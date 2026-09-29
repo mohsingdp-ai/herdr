@@ -1010,6 +1010,49 @@ fn active_workspace_is_the_only_highlight_when_machine_is_expanded() {
 }
 
 #[test]
+fn aggregate_agents_sit_under_machine_and_space_headings() {
+    use crate::api::schema::AgentStatus;
+
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let profile = remote_profile();
+    let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+
+    let mut local = snapshot();
+    local.agents = vec![agent("local agent", AgentStatus::Idle, 1)];
+    state.set_snapshot(Box::new(local));
+    state.set_pane_surface(surface());
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.agents = vec![agent("remote agent", AgentStatus::Idle, 1)];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+
+    let frame = state.compose(100, 40).expect("grouped endpoint frame");
+    let lines = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let find = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
+    };
+    assert!(find("Local · client-shell") < find("local agent"), "{lines:#?}");
+    assert!(find("local agent") < find("Build · client-shell"), "{lines:#?}");
+    assert!(find("Build · client-shell") < find("remote agent"), "{lines:#?}");
+    assert_eq!(state.hits.endpoint_agents.len(), 2);
+}
+
+#[test]
 fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
     use crate::api::schema::AgentStatus;
     use crate::config::{AgentSidebarToken, StatusIndicatorStyle};

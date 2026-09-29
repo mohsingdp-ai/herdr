@@ -572,6 +572,156 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
 }
 
 #[test]
+fn grouped_agent_panel_puts_agents_under_their_space_heading() {
+    let mut projected = snapshot();
+    let mut second = projected.workspaces[0].clone();
+    second.workspace_id = "ws_2".into();
+    second.label = "other-space".into();
+    second.focused = false;
+    projected.workspaces.push(second);
+    let agent = |pane_id: &str, workspace_id: &str, name: &str| ClientShellAgent {
+        pane_id: pane_id.into(),
+        workspace_id: workspace_id.into(),
+        tab_id: "tab_1".into(),
+        name: Some(name.into()),
+        display_agent: None,
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    };
+    // Out of space order on purpose: grouping must pull them together.
+    projected.agents = vec![
+        agent("pane_1", "ws_1", "alpha"),
+        agent("pane_2", "ws_2", "bravo"),
+        agent("pane_3", "ws_1", "charlie"),
+    ];
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Spaces;
+    config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+
+    let frame = state.compose(106, 40).expect("grouped agent frame");
+    let lines = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .take(24)
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let find = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
+    };
+    let first_heading = find("─ client-shell ─");
+    let second_heading = find("─ other-space ─");
+    assert!(first_heading < find("alpha"));
+    assert!(find("alpha") < find("charlie"));
+    assert!(find("charlie") < second_heading);
+    assert!(second_heading < find("bravo"));
+    assert!(lines[second_heading - 1].trim().is_empty(), "{lines:#?}");
+    let hit_panes = state
+        .hits
+        .agents
+        .iter()
+        .map(|(_, pane_id)| pane_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(hit_panes, ["pane_1", "pane_3", "pane_2"]);
+}
+
+#[test]
+fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
+    let mut projected = snapshot();
+    let mut second = projected.workspaces[0].clone();
+    second.workspace_id = "ws_2".into();
+    second.label = "other-space".into();
+    second.branch = Some("dev".into());
+    second.focused = false;
+    projected.workspaces.push(second);
+    let agent = |pane_id: &str, workspace_id: &str, name: &str| ClientShellAgent {
+        pane_id: pane_id.into(),
+        workspace_id: workspace_id.into(),
+        tab_id: "tab_1".into(),
+        name: Some(name.into()),
+        display_agent: None,
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    };
+    projected.agents = vec![
+        agent("pane_1", "ws_1", "alpha"),
+        agent("pane_2", "ws_2", "bravo"),
+        agent("pane_3", "ws_1", "charlie"),
+    ];
+    projected.agents[2].focused = true;
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Spaces;
+    config.ui.sidebar.agents.nested = true;
+    config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+
+    let frame = state.compose(106, 40).expect("nested agent frame");
+    let lines = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .take(30)
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let find = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
+    };
+    let first = find("client-shell");
+    let second = find("other-space");
+    assert!(lines[first].contains("main"), "{lines:#?}");
+    assert!(lines[second].contains("dev"), "{lines:#?}");
+    assert_eq!(find("alpha"), first + 1);
+    assert_eq!(find("charlie"), first + 2);
+    assert_eq!(find("bravo"), second + 1);
+    assert!(!lines.iter().any(|line| line.contains(" agents")), "{lines:#?}");
+    // A blank row, then a divider line, between spaces.
+    assert_eq!(second, first + 5, "{lines:#?}");
+    assert!(lines[first + 3].chars().take(20).all(|c| c == ' '), "{lines:#?}");
+    assert!(lines[first + 4].contains('─'), "{lines:#?}");
+    // Only the focused agent is starred.
+    assert!(lines[first + 2].contains('*'), "{lines:#?}");
+    assert!(!lines[first + 1].contains('*'), "{lines:#?}");
+    let hit_panes = state
+        .hits
+        .agents
+        .iter()
+        .map(|(_, pane_id)| pane_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(hit_panes, ["pane_1", "pane_3", "pane_2"]);
+}
+
+#[test]
 fn muted_agent_sidebar_rows_do_not_stack_terminal_faint() {
     let mut projected = snapshot();
     projected.tabs[0].label = "second".into();

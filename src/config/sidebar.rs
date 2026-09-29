@@ -427,6 +427,9 @@ pub struct AgentsSidebarConfig {
     #[serde(default, deserialize_with = "deserialize_rows_by_agent")]
     pub rows_by_agent: BTreeMap<String, AgentSidebarRows>,
     pub row_gap: u16,
+    /// With `agent_panel_sort = "spaces"`, list each agent under its space in
+    /// the spaces list instead of in a separate agent panel.
+    pub nested: bool,
 }
 
 impl AgentsSidebarConfig {
@@ -451,6 +454,7 @@ impl Default for AgentsSidebarConfig {
             ],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            nested: false,
         }
     }
 }

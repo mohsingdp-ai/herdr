@@ -211,10 +211,22 @@ pub(crate) fn render_sidebar(
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
-    let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
-    hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+    // Grouped agents sit under their space in one list, like Zed's thread
+    // sidebar; priority order (or a filtered agent view) keeps its own panel.
+    let nested = config.agents.nested
+        && snapshot.agent_view_label.is_none()
+        && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces;
+    let (workspace_area, detail_area) = if nested {
+        let (top, bottom) = crate::ui::expanded_sidebar_sections(area, 1.0);
+        (top.union(bottom), Rect::default())
+    } else {
+        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split)
+    };
+    hits.sidebar_section_divider = if nested {
+        Rect::default()
+    } else {
+        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split)
+    };
     put_text(
         buffer,
         workspace_area.x,
@@ -225,6 +237,57 @@ pub(crate) fn render_sidebar(
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
+    if nested && workspace_area.height > 0 {
+        // Same grouped/priority switch the agent panel header has.
+        let label = "grouped";
+        let width = display_width(label).min(workspace_area.width);
+        let rect = Rect::new(
+            workspace_area.right().saturating_sub(width),
+            workspace_area.y,
+            width,
+            1,
+        );
+        if config.mouse_capture {
+            hits.agent_sort_toggle = rect;
+        }
+        put_text(
+            buffer,
+            rect.x,
+            rect.y,
+            rect.width,
+            label,
+            Style::default()
+                .fg(palette.overlay0)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+    let agents = if nested {
+        crate::client::shell::agent_sidebar::agent_rows(snapshot, config, None)
+    } else {
+        Vec::new()
+    };
+    let space_agents = |workspace: &ClientShellWorkspace| {
+        agents
+            .iter()
+            .filter(|agent| agent.workspace_id == workspace.workspace_id)
+            .collect::<Vec<_>>()
+    };
+    let agent_height = |agent: &crate::client::shell::agent_sidebar::AgentRow| {
+        agent.rows.len().max(1) as u16
+    };
+    let space_rows = |workspace: &ClientShellWorkspace, entry: &WorkspaceEntry| {
+        let mut rows = workspace_rows(
+            workspace,
+            displayed_workspace_status(snapshot, workspace, state.collapsed_groups),
+            entry.indented,
+            &config.spaces,
+        );
+        // The branch moves onto the name line (see below).
+        if nested {
+            rows.truncate(1);
+        }
+        rows
+    };
 
     let entries = workspace_entries(snapshot, state.collapsed_groups);
     let body = Rect::new(
@@ -243,26 +306,25 @@ pub(crate) fn render_sidebar(
                 .workspaces
                 .get(entry.index)
                 .map(|workspace| {
-                    workspace_rows(
-                        workspace,
-                        displayed_workspace_status(snapshot, workspace, state.collapsed_groups),
-                        entry.indented,
-                        &config.spaces,
-                    )
-                    .len()
-                    .max(1)
-                    .min(u16::MAX as usize) as u16
+                    let space = space_rows(workspace, entry).len().max(1).min(u16::MAX as usize)
+                        as u16;
+                    space_agents(workspace)
+                        .into_iter()
+                        .fold(space, |height, agent| height.saturating_add(agent_height(agent)))
                 })
                 .unwrap_or(1)
         })
         .collect::<Vec<_>>();
+    // Nested: a blank row, then a divider line, between spaces (worktree
+    // children stay attached).
+    let space_gap = if nested { 2 } else { config.spaces.row_gap };
     let gaps = entries
         .iter()
         .enumerate()
         .map(|(index, _)| {
             entries
                 .get(index + 1)
-                .map_or(0, |next| u16::from(!next.indented) * config.spaces.row_gap)
+                .map_or(0, |next| u16::from(!next.indented) * space_gap)
         })
         .collect::<Vec<_>>();
     let mut metrics = super::scroll::list_scroll_metrics(
@@ -304,7 +366,7 @@ pub(crate) fn render_sidebar(
             continue;
         };
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
-        let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
+        let rows = space_rows(workspace, entry);
         let row_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
         if y.saturating_add(row_height) > body.bottom() {
             break;
@@ -321,9 +383,35 @@ pub(crate) fn render_sidebar(
         } else if workspace.focused {
             buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         }
+        // Nested: the branch sits at the right end of the name line, left of
+        // any group toggle. Worktree children already show their branch as the name.
+        let branch = workspace
+            .branch
+            .as_deref()
+            .filter(|_| nested && !entry.indented && rect.height > 0);
+        let name_rect = branch.map_or(rect, |branch| {
+            let right = rect
+                .right()
+                .saturating_sub(if parent_group_key(snapshot, entry.index).is_some() { 2 } else { 1 });
+            let x = right.saturating_sub(display_width(branch)).max(rect.x);
+            put_text(
+                buffer,
+                x,
+                rect.y,
+                right.saturating_sub(x),
+                branch,
+                Style::default().fg(if workspace.focused {
+                    palette.mauve
+                } else {
+                    palette.overlay0
+                }),
+            );
+            // render_workspace_rows stops 2 columns short of its area: 1 column gap.
+            Rect::new(rect.x, rect.y, (x + 1).saturating_sub(rect.x), rect.height)
+        });
         render_workspace_rows(
             buffer,
-            rect,
+            name_rect,
             status,
             config.status_indicators,
             entry,
@@ -334,6 +422,38 @@ pub(crate) fn render_sidebar(
             dragged,
             palette,
         );
+        // The space's agents, indented under it; they scroll with it.
+        let mut agent_y = rect.bottom();
+        let indent = if entry.indented { 5 } else { 2 };
+        for agent in space_agents(workspace) {
+            let height = agent_height(agent);
+            if agent_y.saturating_add(height) > body.bottom() {
+                break;
+            }
+            let agent_rect = Rect::new(
+                body.x.saturating_add(indent),
+                agent_y,
+                content_width.saturating_sub(indent),
+                height,
+            );
+            crate::client::shell::agent_sidebar::render_agent_row(buffer, agent_rect, agent, config);
+            if agent.focused {
+                // The row background may match the sidebar, so mark it plainly.
+                put_text(
+                    buffer,
+                    agent_rect.x.saturating_sub(1),
+                    agent_y,
+                    1,
+                    "*",
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                );
+            }
+            hits.agents.push((agent_rect, agent.pane_id.clone()));
+            agent_y = agent_y.saturating_add(height);
+        }
+        let row_height = agent_y.saturating_sub(rect.y);
         let group_toggle = render_parent_group_toggle(
             buffer,
             rect,
@@ -351,7 +471,18 @@ pub(crate) fn render_sidebar(
         });
         let gap = entries
             .get(entry_position + 1)
-            .map_or(0, |next| u16::from(!next.indented) * config.spaces.row_gap);
+            .map_or(0, |next| u16::from(!next.indented) * space_gap);
+        let divider_y = y.saturating_add(row_height + 1);
+        if nested && gap > 0 && divider_y < body.bottom() {
+            put_text(
+                buffer,
+                body.x.saturating_add(1),
+                divider_y,
+                content_width.saturating_sub(2),
+                &"─".repeat(content_width.saturating_sub(2) as usize),
+                Style::default().fg(palette.surface_dim),
+            );
+        }
         y = y.saturating_add(row_height + gap);
     }
 
@@ -430,14 +561,16 @@ pub(crate) fn render_sidebar(
         }
     }
 
-    super::render_agent_panel(
-        buffer,
-        detail_area,
-        snapshot,
-        config,
-        state.agent_scroll,
-        hits,
-    );
+    if !nested {
+        super::render_agent_panel(
+            buffer,
+            detail_area,
+            snapshot,
+            config,
+            state.agent_scroll,
+            hits,
+        );
+    }
 
     hits.sidebar_toggle = Rect::new(
         area.right().saturating_sub(2),

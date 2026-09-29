@@ -12,6 +12,7 @@ use super::*;
 
 pub(super) struct AgentRow {
     pub(super) pane_id: String,
+    pub(super) workspace_id: String,
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
@@ -35,13 +36,21 @@ pub(super) fn ordered_agent_pane_ids(
             .collect();
     }
     let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
-    if sort == crate::config::AgentPanelSortConfig::Priority {
-        agents.sort_by_key(|agent| {
+    match sort {
+        crate::config::AgentPanelSortConfig::Priority => agents.sort_by_key(|agent| {
             (
                 std::cmp::Reverse(status_priority(agent.agent_status)),
                 std::cmp::Reverse(agent.state_change_seq),
             )
-        });
+        }),
+        // Keep each space's agents together, in sidebar order, so they can sit
+        // under one heading.
+        crate::config::AgentPanelSortConfig::Spaces => agents.sort_by_key(|agent| {
+            snapshot
+                .workspaces
+                .iter()
+                .position(|workspace| workspace.workspace_id == agent.workspace_id)
+        }),
     }
     agents
         .into_iter()
@@ -67,7 +76,19 @@ pub(super) fn render_agent_panel(
         return;
     }
 
-    let rows = agent_rows(snapshot, config, None);
+    let grouped = snapshot.agent_view_label.is_none()
+        && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces;
+    let rows = with_group_headings(agent_rows(snapshot, config, None), |row| {
+        let workspace = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| grouped && workspace.workspace_id == row.workspace_id)?;
+        Some((
+            row.workspace_id.clone(),
+            workspace.label.clone(),
+            workspace.focused,
+        ))
+    });
     render_agent_list(
         buffer,
         area,
@@ -79,12 +100,118 @@ pub(super) fn render_agent_panel(
         config,
         agent_scroll,
         hits,
-        |row| row.rows.len(),
+        |row| panel_row_height(row, |row| row.rows.len()),
         |buffer, rect, row, hits| {
-            hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, config);
+            render_panel_row(buffer, rect, row, grouped, config, |buffer, inner, row| {
+                hits.agents.push((rect, row.pane_id.clone()));
+                render_agent_row(buffer, inner, row, config);
+            })
         },
     );
+}
+
+/// An agent panel entry: an agent, or the heading over one space's agents.
+pub(super) enum PanelRow<T> {
+    Heading {
+        label: String,
+        focused: bool,
+        /// Leave a blank line above every heading but the first.
+        gap: bool,
+    },
+    Agent(T),
+}
+
+/// Puts a heading before each run of agents sharing a group key. `heading`
+/// returns `(key, label, focused)`, or `None` to leave the agent ungrouped.
+pub(super) fn with_group_headings<T, K: PartialEq>(
+    rows: Vec<T>,
+    heading: impl Fn(&T) -> Option<(K, String, bool)>,
+) -> Vec<PanelRow<T>> {
+    let mut out = Vec::with_capacity(rows.len());
+    let mut last_key = None;
+    for row in rows {
+        if let Some((key, label, focused)) = heading(&row) {
+            if last_key.as_ref() != Some(&key) {
+                out.push(PanelRow::Heading {
+                    label,
+                    focused,
+                    gap: !out.is_empty(),
+                });
+                last_key = Some(key);
+            }
+        }
+        out.push(PanelRow::Agent(row));
+    }
+    out
+}
+
+pub(super) fn panel_row_height<T>(row: &PanelRow<T>, agent_lines: impl Fn(&T) -> usize) -> usize {
+    match row {
+        PanelRow::Heading { gap, .. } => 1 + usize::from(*gap),
+        PanelRow::Agent(row) => agent_lines(row),
+    }
+}
+
+/// Draws a heading, or hands an agent its row rect, indented under headings.
+pub(super) fn render_panel_row<T>(
+    buffer: &mut Buffer,
+    rect: Rect,
+    row: &PanelRow<T>,
+    grouped: bool,
+    config: &ClientShellConfig,
+    render_agent: impl FnOnce(&mut Buffer, Rect, &T),
+) {
+    match row {
+        PanelRow::Heading { label, focused, .. } => {
+            let y = rect.bottom().saturating_sub(1);
+            render_group_heading(
+                buffer,
+                Rect::new(rect.x, y, rect.width, 1),
+                label,
+                *focused,
+                config,
+            );
+        }
+        PanelRow::Agent(row) => {
+            let indent = if grouped { 2.min(rect.width) } else { 0 };
+            let inner = Rect::new(rect.x + indent, rect.y, rect.width - indent, rect.height);
+            render_agent(buffer, inner, row);
+        }
+    }
+}
+
+/// Draws `──── name ────` centered across the panel.
+fn render_group_heading(
+    buffer: &mut Buffer,
+    rect: Rect,
+    label: &str,
+    focused: bool,
+    config: &ClientShellConfig,
+) {
+    let palette = &config.palette;
+    let rule = Style::default()
+        .fg(palette.overlay0)
+        .add_modifier(Modifier::DIM);
+    let name = Style::default()
+        .fg(if focused {
+            palette.accent
+        } else {
+            palette.overlay0
+        })
+        .add_modifier(Modifier::BOLD);
+    // One column of margin on each side.
+    let inner = rect.width.saturating_sub(2) as usize;
+    let title = format!(" {label} ");
+    let title_width = display_width(&title).min(inner);
+    let left = (inner - title_width) / 2;
+    let right = inner - title_width - left;
+    Paragraph::new(Line::from(vec![
+        ratatui::text::Span::raw(" "),
+        ratatui::text::Span::styled("─".repeat(left), rule),
+        ratatui::text::Span::styled(title, name),
+        ratatui::text::Span::styled("─".repeat(right), rule),
+    ]))
+    .render(rect, buffer);
 }
 
 pub(super) fn render_agent_panel_header(
@@ -312,6 +439,7 @@ pub(super) fn agent_row(
     );
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
+        workspace_id: agent.workspace_id.clone(),
         status: agent.agent_status,
         focused: agent.focused,
         rows,
