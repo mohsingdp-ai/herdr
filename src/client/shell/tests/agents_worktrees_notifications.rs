@@ -646,7 +646,7 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
     let mut projected = snapshot();
     let mut second = projected.workspaces[0].clone();
     second.workspace_id = "ws_2".into();
-    second.label = "other-space".into();
+    second.label = "other".into();
     second.branch = Some("dev".into());
     second.git_ahead_behind = Some((1, 2));
     second.focused = false;
@@ -699,7 +699,7 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
             .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
     };
     let first = find("client-shell");
-    let second = find("other-space");
+    let second = find("○ other");
     assert!(lines[first].contains("main"), "{lines:#?}");
     assert!(lines[second].contains("dev ↑1 ↓2"), "{lines:#?}");
     assert_eq!(find("alpha"), first + 1);
@@ -709,16 +709,19 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
         !lines.iter().any(|line| line.contains(" agents")),
         "{lines:#?}"
     );
-    // A blank row, then a divider line, between spaces.
-    assert_eq!(second, first + 5, "{lines:#?}");
-    assert!(
-        lines[first + 3].chars().take(20).all(|c| c == ' '),
-        "{lines:#?}"
-    );
-    assert!(lines[first + 4].contains('─'), "{lines:#?}");
-    // Only the focused agent is starred.
-    assert!(lines[first + 2].contains('*'), "{lines:#?}");
-    assert!(!lines[first + 1].contains('*'), "{lines:#?}");
+    // A divider line, and no blank row, between spaces.
+    assert_eq!(second, first + 4, "{lines:#?}");
+    assert!(lines[first + 3].contains('─'), "{lines:#?}");
+    // A guide line runs down beside each space's agents.
+    assert!(lines[first + 1].starts_with(" │ alpha"), "{lines:#?}");
+    assert!(lines[first + 2].starts_with(" │ charlie"), "{lines:#?}");
+    // Only the focused agent's row gets the surface bar, from the guide on.
+    let bg = |y: usize, x: usize| frame.cells[y * frame.width as usize + x].bg;
+    let surface = crate::protocol::color_to_u32(state.config.palette.surface0);
+    assert_eq!(bg(first + 2, 1), surface);
+    assert_eq!(bg(first + 2, 10), surface);
+    assert_ne!(bg(first + 1, 10), surface);
+    assert!(!lines.iter().any(|line| line.contains('*')), "{lines:#?}");
     let hit_panes = state
         .hits
         .agents
@@ -726,6 +729,30 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
         .map(|(_, pane_id)| pane_id.as_str())
         .collect::<Vec<_>>();
     assert_eq!(hit_panes, ["pane_1", "pane_3", "pane_2"]);
+    assert_eq!(state.hits.space_agent_toggles.len(), 2);
+    let sidebar_line = |frame: &crate::client::frame_output::ComposedFrame, y: u16| {
+        frame.cells[y as usize * frame.width as usize..][..frame.width as usize]
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect::<String>()
+    };
+    let (toggle, key) = state.hits.space_agent_toggles[0].clone();
+    assert_eq!(key, "agents:ws_1");
+    assert!(sidebar_line(&frame, toggle.y).contains('⌃'));
+
+    // Folding a space hides its agents and flips the chevron.
+    state.collapsed_groups.insert(key);
+    let frame = state.compose(106, 40).expect("folded agent frame");
+    let text = (0..frame.height)
+        .map(|y| sidebar_line(&frame, y))
+        .collect::<Vec<_>>();
+    assert!(!text.iter().any(|line| line.contains("alpha")), "{text:#?}");
+    assert!(
+        !text.iter().any(|line| line.contains("charlie")),
+        "{text:#?}"
+    );
+    assert!(text.iter().any(|line| line.contains("bravo")), "{text:#?}");
+    assert!(sidebar_line(&frame, toggle.y).contains('⌄'), "{text:#?}");
 }
 
 #[test]

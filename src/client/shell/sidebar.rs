@@ -266,10 +266,21 @@ pub(crate) fn render_sidebar(
     } else {
         Vec::new()
     };
+    // ponytail: keyed by workspace id, so a folded space can reopen folded
+    // under a reused id after restart; key by something stabler if that bites.
+    let agents_key =
+        |workspace: &ClientShellWorkspace| format!("agents:{}", workspace.workspace_id);
+    let has_agents = |workspace: &ClientShellWorkspace| {
+        agents
+            .iter()
+            .any(|agent| agent.workspace_id == workspace.workspace_id)
+    };
+    // A folded space hides its agents.
     let space_agents = |workspace: &ClientShellWorkspace| {
         agents
             .iter()
             .filter(|agent| agent.workspace_id == workspace.workspace_id)
+            .filter(|_| !state.collapsed_groups.contains(&agents_key(workspace)))
             .collect::<Vec<_>>()
     };
     let agent_height =
@@ -318,9 +329,9 @@ pub(crate) fn render_sidebar(
                 .unwrap_or(1)
         })
         .collect::<Vec<_>>();
-    // Nested: a blank row, then a divider line, between spaces (worktree
+    // Nested: a divider line between spaces (worktree
     // children stay attached).
-    let space_gap = if nested { 2 } else { config.spaces.row_gap };
+    let space_gap = if nested { 1 } else { config.spaces.row_gap };
     let gaps = entries
         .iter()
         .enumerate()
@@ -386,20 +397,46 @@ pub(crate) fn render_sidebar(
         } else if workspace.focused {
             buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         }
-        // Nested: the branch sits at the right end of the name line, left of
-        // any group toggle. Worktree children already show their branch as the name.
+        // Nested: the branch sits at the right end of the name line, then the
+        // show/hide-agents chevron, then any group toggle. Worktree children
+        // already show their branch as the name.
+        let mut right =
+            rect.right()
+                .saturating_sub(if parent_group_key(snapshot, entry.index).is_some() {
+                    2
+                } else {
+                    1
+                });
+        let agents_toggle = (nested && rect.height > 0 && has_agents(workspace)).then(|| {
+            let key = agents_key(workspace);
+            let toggle = Rect::new(right.saturating_sub(1).max(rect.x), rect.y, 1, 1);
+            put_text(
+                buffer,
+                toggle.x,
+                toggle.y,
+                1,
+                if state.collapsed_groups.contains(&key) {
+                    "⌄"
+                } else {
+                    "⌃"
+                },
+                // Same colour as the space name.
+                if workspace.focused || dragged {
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(palette.subtext0)
+                },
+            );
+            right = toggle.x.saturating_sub(1).max(rect.x);
+            (toggle, key)
+        });
         let branch = workspace
             .branch
             .as_deref()
             .filter(|_| nested && !entry.indented && rect.height > 0);
         let name_rect = branch.map_or(rect, |branch| {
-            let right =
-                rect.right()
-                    .saturating_sub(if parent_group_key(snapshot, entry.index).is_some() {
-                        2
-                    } else {
-                        1
-                    });
             // Ahead/behind arrows follow the branch, as on the dropped git row.
             let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
             let segments = [
@@ -445,6 +482,18 @@ pub(crate) fn render_sidebar(
             // render_workspace_rows stops 2 columns short of its area: 1 column gap.
             Rect::new(rect.x, rect.y, (x + 1).saturating_sub(rect.x), rect.height)
         });
+        let name_rect = match (branch, &agents_toggle) {
+            (None, Some(_)) => Rect::new(
+                rect.x,
+                rect.y,
+                (right + 1).saturating_sub(rect.x),
+                rect.height,
+            ),
+            _ => name_rect,
+        };
+        if config.mouse_capture {
+            hits.space_agent_toggles.extend(agents_toggle);
+        }
         render_workspace_rows(
             buffer,
             name_rect,
@@ -460,7 +509,9 @@ pub(crate) fn render_sidebar(
         );
         // The space's agents, indented under it; they scroll with it.
         let mut agent_y = rect.bottom();
-        let indent = if entry.indented { 5 } else { 2 };
+        // A dim guide runs down under the space's status dot; agents sit after it.
+        let guide = if entry.indented { 6 } else { 1 };
+        let indent = guide + 1;
         for agent in space_agents(workspace) {
             let height = agent_height(agent);
             if agent_y.saturating_add(height) > body.bottom() {
@@ -476,16 +527,21 @@ pub(crate) fn render_sidebar(
                 buffer, agent_rect, agent, config,
             );
             if agent.focused {
-                // The row background may match the sidebar, so mark it plainly.
+                // Themes may set active_row_bg to the sidebar colour, so the
+                // focused agent gets a surface bar across the whole row.
+                buffer.set_style(
+                    Rect::new(body.x, agent_y, content_width, height),
+                    Style::default().bg(palette.surface0),
+                );
+            }
+            for row in agent_y..agent_y.saturating_add(height) {
                 put_text(
                     buffer,
-                    agent_rect.x.saturating_sub(1),
-                    agent_y,
+                    body.x.saturating_add(guide),
+                    row,
                     1,
-                    "*",
-                    Style::default()
-                        .fg(palette.accent)
-                        .add_modifier(Modifier::BOLD),
+                    "│",
+                    Style::default().fg(palette.overlay0),
                 );
             }
             hits.agents.push((agent_rect, agent.pane_id.clone()));
@@ -510,7 +566,7 @@ pub(crate) fn render_sidebar(
         let gap = entries
             .get(entry_position + 1)
             .map_or(0, |next| u16::from(!next.indented) * space_gap);
-        let divider_y = y.saturating_add(row_height + 1);
+        let divider_y = y.saturating_add(row_height);
         if nested && gap > 0 && divider_y < body.bottom() {
             put_text(
                 buffer,
