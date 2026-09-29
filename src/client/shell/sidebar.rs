@@ -272,9 +272,8 @@ pub(crate) fn render_sidebar(
             .filter(|agent| agent.workspace_id == workspace.workspace_id)
             .collect::<Vec<_>>()
     };
-    let agent_height = |agent: &crate::client::shell::agent_sidebar::AgentRow| {
-        agent.rows.len().max(1) as u16
-    };
+    let agent_height =
+        |agent: &crate::client::shell::agent_sidebar::AgentRow| agent.rows.len().max(1) as u16;
     let space_rows = |workspace: &ClientShellWorkspace, entry: &WorkspaceEntry| {
         let mut rows = workspace_rows(
             workspace,
@@ -306,11 +305,15 @@ pub(crate) fn render_sidebar(
                 .workspaces
                 .get(entry.index)
                 .map(|workspace| {
-                    let space = space_rows(workspace, entry).len().max(1).min(u16::MAX as usize)
-                        as u16;
+                    let space = space_rows(workspace, entry)
+                        .len()
+                        .max(1)
+                        .min(u16::MAX as usize) as u16;
                     space_agents(workspace)
                         .into_iter()
-                        .fold(space, |height, agent| height.saturating_add(agent_height(agent)))
+                        .fold(space, |height, agent| {
+                            height.saturating_add(agent_height(agent))
+                        })
                 })
                 .unwrap_or(1)
         })
@@ -390,22 +393,55 @@ pub(crate) fn render_sidebar(
             .as_deref()
             .filter(|_| nested && !entry.indented && rect.height > 0);
         let name_rect = branch.map_or(rect, |branch| {
-            let right = rect
-                .right()
-                .saturating_sub(if parent_group_key(snapshot, entry.index).is_some() { 2 } else { 1 });
-            let x = right.saturating_sub(display_width(branch)).max(rect.x);
-            put_text(
-                buffer,
-                x,
-                rect.y,
-                right.saturating_sub(x),
-                branch,
-                Style::default().fg(if workspace.focused {
-                    palette.mauve
-                } else {
-                    palette.overlay0
-                }),
-            );
+            let right =
+                rect.right()
+                    .saturating_sub(if parent_group_key(snapshot, entry.index).is_some() {
+                        2
+                    } else {
+                        1
+                    });
+            // Ahead/behind arrows follow the branch, as on the dropped git row.
+            let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
+            let segments = [
+                (
+                    branch.to_string(),
+                    if workspace.focused {
+                        palette.mauve
+                    } else {
+                        palette.overlay0
+                    },
+                ),
+                (
+                    if ahead > 0 {
+                        format!(" ↑{ahead}")
+                    } else {
+                        String::new()
+                    },
+                    palette.green,
+                ),
+                (
+                    if behind > 0 {
+                        format!(" ↓{behind}")
+                    } else {
+                        String::new()
+                    },
+                    palette.red,
+                ),
+            ];
+            let width = segments.iter().fold(0u16, |width, (text, _)| {
+                width.saturating_add(display_width(text))
+            });
+            let x = right.saturating_sub(width).max(rect.x);
+            segments.iter().fold(x, |cursor, (text, color)| {
+                put_segment(
+                    buffer,
+                    cursor,
+                    rect.y,
+                    right,
+                    text,
+                    Style::default().fg(*color),
+                )
+            });
             // render_workspace_rows stops 2 columns short of its area: 1 column gap.
             Rect::new(rect.x, rect.y, (x + 1).saturating_sub(rect.x), rect.height)
         });
@@ -436,7 +472,9 @@ pub(crate) fn render_sidebar(
                 content_width.saturating_sub(indent),
                 height,
             );
-            crate::client::shell::agent_sidebar::render_agent_row(buffer, agent_rect, agent, config);
+            crate::client::shell::agent_sidebar::render_agent_row(
+                buffer, agent_rect, agent, config,
+            );
             if agent.focused {
                 // The row background may match the sidebar, so mark it plainly.
                 put_text(

@@ -648,6 +648,7 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
     second.workspace_id = "ws_2".into();
     second.label = "other-space".into();
     second.branch = Some("dev".into());
+    second.git_ahead_behind = Some((1, 2));
     second.focused = false;
     projected.workspaces.push(second);
     let agent = |pane_id: &str, workspace_id: &str, name: &str| ClientShellAgent {
@@ -700,14 +701,20 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
     let first = find("client-shell");
     let second = find("other-space");
     assert!(lines[first].contains("main"), "{lines:#?}");
-    assert!(lines[second].contains("dev"), "{lines:#?}");
+    assert!(lines[second].contains("dev ↑1 ↓2"), "{lines:#?}");
     assert_eq!(find("alpha"), first + 1);
     assert_eq!(find("charlie"), first + 2);
     assert_eq!(find("bravo"), second + 1);
-    assert!(!lines.iter().any(|line| line.contains(" agents")), "{lines:#?}");
+    assert!(
+        !lines.iter().any(|line| line.contains(" agents")),
+        "{lines:#?}"
+    );
     // A blank row, then a divider line, between spaces.
     assert_eq!(second, first + 5, "{lines:#?}");
-    assert!(lines[first + 3].chars().take(20).all(|c| c == ' '), "{lines:#?}");
+    assert!(
+        lines[first + 3].chars().take(20).all(|c| c == ' '),
+        "{lines:#?}"
+    );
     assert!(lines[first + 4].contains('─'), "{lines:#?}");
     // Only the focused agent is starred.
     assert!(lines[first + 2].contains('*'), "{lines:#?}");

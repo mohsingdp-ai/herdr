@@ -1046,9 +1046,18 @@ fn aggregate_agents_sit_under_machine_and_space_headings() {
             .position(|line| line.contains(needle))
             .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
     };
-    assert!(find("Local · client-shell") < find("local agent"), "{lines:#?}");
-    assert!(find("local agent") < find("Build · client-shell"), "{lines:#?}");
-    assert!(find("Build · client-shell") < find("remote agent"), "{lines:#?}");
+    assert!(
+        find("Local · client-shell") < find("local agent"),
+        "{lines:#?}"
+    );
+    assert!(
+        find("local agent") < find("Build · client-shell"),
+        "{lines:#?}"
+    );
+    assert!(
+        find("Build · client-shell") < find("remote agent"),
+        "{lines:#?}"
+    );
     assert_eq!(state.hits.endpoint_agents.len(), 2);
 }
 
