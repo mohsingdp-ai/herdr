@@ -46,6 +46,19 @@ pub(super) fn workspace_close(params: WorkspaceCloseParams) -> std::io::Result<i
     print_method_response("cli:workspace:close", Method::WorkspaceClose(params))
 }
 
+pub(super) fn workspace_closed_list() -> std::io::Result<i32> {
+    print_method_response(
+        "cli:workspace:closed",
+        Method::WorkspaceClosedList(EmptyParams::default()),
+    )
+}
+
+pub(super) fn workspace_reopen(
+    params: crate::api::schema::WorkspaceReopenParams,
+) -> std::io::Result<i32> {
+    print_method_response("cli:workspace:reopen", Method::WorkspaceReopen(params))
+}
+
 pub(super) fn tab_list(params: TabListParams) -> std::io::Result<i32> {
     print_method_response("cli:tab:list", Method::TabList(params))
 }

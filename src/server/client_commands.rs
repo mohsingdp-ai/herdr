@@ -44,11 +44,13 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "tab.move",
     "tab.rename",
     "workspace.close",
+    "workspace.closed.list",
     "workspace.create",
     "workspace.focus",
     "workspace.move",
     "workspace.move_block",
     "workspace.rename",
+    "workspace.reopen",
     "worktree.create",
     "worktree.list",
     "worktree.open",
@@ -296,6 +298,14 @@ mod tests {
         assert_eq!(
             actual.remove("pane.link.resolve").as_deref(),
             Some("f5e4a3e01453ae7b188f127ce951c12c20e0bebcc17cc364eeb6d1a01fd5bf81")
+        );
+        assert_eq!(
+            actual.remove("workspace.closed.list").as_deref(),
+            Some("d8571139f9847e23090f2b03c9ee7e421e696f073aa30f27131234942ec85f1c")
+        );
+        assert_eq!(
+            actual.remove("workspace.reopen").as_deref(),
+            Some("5a3ce9f80540fd104dd635df8bf8250a5da712942a26cf11c7548242b8e2e36d")
         );
 
         assert_eq!(

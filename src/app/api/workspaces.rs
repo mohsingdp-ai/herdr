@@ -336,6 +336,7 @@ impl App {
                 )
             })
             .collect::<Vec<_>>();
+        self.remember_closed_workspaces(&close_indices);
         self.state.selected = index;
         self.state.close_selected_workspace();
         self.shutdown_detached_terminal_runtimes();

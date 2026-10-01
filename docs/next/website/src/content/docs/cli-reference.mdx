@@ -160,6 +160,8 @@ herdr workspace focus <workspace_id>
 herdr workspace rename <workspace_id> <label>
 herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]
 herdr workspace close <workspace_id> [--group]
+herdr workspace closed
+herdr workspace reopen [closed_id] [--no-focus]
 ```
 
 Create a workspace without stealing focus:
@@ -169,6 +171,8 @@ herdr workspace create --cwd ~/project --label api --no-focus
 ```
 
 A workspace is a top-level project or work context. Creating one also creates its first tab and root pane. The JSON response exposes their IDs as `.result.workspace.workspace_id`, `.result.tab.tab_id`, and `.result.root_pane.pane_id`.
+
+Herdr remembers the last 10 workspaces closed with `workspace close` (or the close action in the app), including across server restarts. `workspace closed` lists them newest first. `workspace reopen` brings back the most recent one, or the one named by a `closed_id` from that list, with its tabs, split layout and pane folders. Panes start fresh shells; agents that reported a native session resume it. The app's menu has the same action as **reopen space**. Workspaces that close because their last pane exits are not remembered.
 
 ## Worktrees
 

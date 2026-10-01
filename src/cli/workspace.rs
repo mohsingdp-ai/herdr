@@ -18,6 +18,8 @@ pub(super) fn run_workspace_command(args: &[String]) -> std::io::Result<i32> {
         "rename" => workspace_rename(&args[1..]),
         "report-metadata" => workspace_report_metadata(&args[1..]),
         "close" => workspace_close(&args[1..]),
+        "closed" => workspace_closed(&args[1..]),
+        "reopen" => workspace_reopen(&args[1..]),
         "help" | "--help" | "-h" => {
             print_workspace_help();
             Ok(0)
@@ -241,6 +243,28 @@ fn workspace_close(args: &[String]) -> std::io::Result<i32> {
     })
 }
 
+fn workspace_closed(args: &[String]) -> std::io::Result<i32> {
+    if !args.is_empty() {
+        eprintln!("usage: herdr workspace closed");
+        return Ok(2);
+    }
+    super::runtime::workspace_closed_list()
+}
+
+fn workspace_reopen(args: &[String]) -> std::io::Result<i32> {
+    let (closed_id, focus) = match args {
+        [] => (None, true),
+        [flag] if flag == "--no-focus" => (None, false),
+        [closed_id] => (Some(closed_id.clone()), true),
+        [closed_id, flag] if flag == "--no-focus" => (Some(closed_id.clone()), false),
+        _ => {
+            eprintln!("usage: herdr workspace reopen [closed_id] [--no-focus]");
+            return Ok(2);
+        }
+    };
+    super::runtime::workspace_reopen(crate::api::schema::WorkspaceReopenParams { closed_id, focus })
+}
+
 fn print_workspace_help() {
     eprintln!("herdr workspace commands:");
     eprintln!("  herdr workspace list");
@@ -250,4 +274,6 @@ fn print_workspace_help() {
     eprintln!("  herdr workspace rename <workspace_id> <label>");
     eprintln!("  herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
     eprintln!("  herdr workspace close <workspace_id> [--group]");
+    eprintln!("  herdr workspace closed");
+    eprintln!("  herdr workspace reopen [closed_id] [--no-focus]");
 }

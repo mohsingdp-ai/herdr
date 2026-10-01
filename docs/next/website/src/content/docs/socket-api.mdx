@@ -100,7 +100,7 @@ Raw socket method names use dot notation:
 | Notification | `notification.show` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
-| Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
+| Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close`, `workspace.closed.list`, `workspace.reopen` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.close` |
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
@@ -364,6 +364,8 @@ Use at most one of `workspace_id` or `cwd` for `worktree.list`, `worktree.create
 Worktree commands also emit lifecycle events. `worktree.create` emits `workspace.created`, `tab.created`, `pane.created`, and `worktree.created`. `worktree.open` emits `worktree.opened`, and it also emits workspace/tab/pane creation events when it opens a new Herdr workspace. `worktree.remove` emits `worktree.removed`; if the linked workspace is still open, it also emits `workspace.closed`.
 
 `workspace.close` rejects closing a primary workspace while linked-worktree workspaces are open unless its params include `"close_group": true`, returning `workspace_group_close_required` when explicit group intent is missing. An explicit group close emits one `workspace.closed` event for each workspace it closes.
+
+`workspace.close` also remembers each closed workspace; the last 10 are kept. `workspace.closed.list` returns them newest first as `closed_workspace_list` entries with `closed_id`, `label`, `cwd`, `tab_count`, and `closed_at` (Unix seconds). `workspace.reopen` takes an optional `closed_id` (default: the most recent) and `focus`, restores that workspace's tabs and layout, and returns the same `workspace_created` result and creation events as `workspace.create`. It returns `closed_workspace_not_found` when there is nothing to reopen.
 
 ## Agent view queries
 

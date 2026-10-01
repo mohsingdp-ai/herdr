@@ -27,6 +27,27 @@ pub struct WorkspaceCloseParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkspaceReopenParams {
+    /// A `closed_id` from `workspace.closed.list`; omit it to reopen the most
+    /// recently closed workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_id: Option<String>,
+    #[serde(default)]
+    pub focus: bool,
+}
+
+/// A recently closed workspace that `workspace.reopen` can bring back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClosedWorkspaceInfo {
+    pub closed_id: String,
+    pub label: String,
+    pub cwd: String,
+    pub tab_count: usize,
+    /// Unix seconds.
+    pub closed_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceRenameParams {
     pub workspace_id: String,
     pub label: String,

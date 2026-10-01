@@ -4466,6 +4466,22 @@
           ],
           "type": "object"
         },
+        "WorkspaceReopenParams": {
+          "properties": {
+            "closed_id": {
+              "description": "A `closed_id` from `workspace.closed.list`; omit it to reopen the most\nrecently closed workspace.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "focus": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "WorkspaceReportMetadataParams": {
           "properties": {
             "seq": {
@@ -5057,6 +5073,38 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceCloseParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.closed.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.reopen",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceReopenParams"
             }
           },
           "required": [
@@ -6783,6 +6831,39 @@
             "no_foreground_client"
           ],
           "type": "string"
+        },
+        "ClosedWorkspaceInfo": {
+          "description": "A recently closed workspace that `workspace.reopen` can bring back.",
+          "properties": {
+            "closed_at": {
+              "description": "Unix seconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "closed_id": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "tab_count": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "closed_id",
+            "label",
+            "cwd",
+            "tab_count",
+            "closed_at"
+          ],
+          "type": "object"
         },
         "ConfigReloadStatus": {
           "enum": [
@@ -9265,6 +9346,25 @@
                 "workspaces": {
                   "items": {
                     "$ref": "#/schemas/success_response/$defs/WorkspaceInfo"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "type",
+                "workspaces"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "closed_workspace_list",
+                  "type": "string"
+                },
+                "workspaces": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/ClosedWorkspaceInfo"
                   },
                   "type": "array"
                 }

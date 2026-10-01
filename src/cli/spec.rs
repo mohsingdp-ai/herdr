@@ -221,6 +221,13 @@ fn workspace_command() -> Command {
                 .arg(option("ttl-ms", "N")),
         )
         .subcommand(id_command("close", "workspace_id", "Close a workspace"))
+        .subcommand(Command::new("closed").about("List recently closed workspaces"))
+        .subcommand(
+            Command::new("reopen")
+                .about("Reopen a closed workspace (the most recent by default)")
+                .arg(Arg::new("closed_id").value_name("CLOSED_ID"))
+                .arg(flag("no-focus")),
+        )
 }
 
 fn worktree_command() -> Command {
