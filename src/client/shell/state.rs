@@ -100,6 +100,8 @@ pub(super) struct ShellHitMap {
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
+    /// Sidebar footer ↺: opens the space picker.
+    pub(super) space_picker: Rect,
     /// Nested sidebar: show/hide chevrons for each space's agents.
     pub(super) space_agent_toggles: Vec<(Rect, String)>,
     pub(super) sidebar_divider: Rect,
@@ -256,6 +258,8 @@ pub(crate) enum ClientShellAction {
     },
     ReplayMouse(Vec<crossterm::event::MouseEvent>),
     Keybind(crate::input::KeybindAction),
+    /// Show the desktop's folder picker; the answer returns as `receive_folder_pick`.
+    PickFolder,
 }
 
 #[derive(Default)]
@@ -293,6 +297,7 @@ pub(super) enum ClientShellOverlayKind {
     ContextMenu,
     GlobalMenu,
     Settings,
+    SpacePicker,
 }
 
 #[derive(Debug)]
@@ -317,6 +322,8 @@ pub(super) enum ClientRenameTarget {
     Pane {
         pane_id: String,
     },
+    /// Open the typed folder as a new space.
+    OpenFolder,
 }
 
 #[derive(Debug)]
@@ -593,6 +600,7 @@ pub(super) enum ClientShellOverlay {
     ContextMenu(ClientContextMenuOverlay),
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
+    SpacePicker(ClientSpacePickerOverlay),
 }
 
 impl ClientShellOverlay {
@@ -610,6 +618,7 @@ impl ClientShellOverlay {
             Self::WorktreeRemove(_) => ClientShellOverlayKind::WorktreeRemove,
             Self::ContextMenu(_) => ClientShellOverlayKind::ContextMenu,
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
+            Self::SpacePicker(_) => ClientShellOverlayKind::SpacePicker,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
         }
     }
@@ -641,6 +650,8 @@ pub(super) enum PendingEndpointKind {
     WorktreeRemove {
         forced: bool,
     },
+    SpacePickerList,
+    SpacePickerReopen,
     SelectionCopy,
     PaneScroll {
         pane_id: String,
@@ -721,6 +732,8 @@ pub(crate) enum ClientShellNotificationEffect {
     System {
         title: String,
         body: Option<String>,
+        /// Pane to select when the notification is clicked.
+        target: Option<(ClientEndpointId, String)>,
     },
 }
 
@@ -900,6 +913,8 @@ pub(crate) struct ClientShellState {
     pub(super) replaying_url_click: bool,
     pub(super) selection: Option<crate::selection::Selection<String>>,
     pub(super) last_pane_click: Option<ClientPaneClick>,
+    /// Last sidebar agent-row click, for double-click to rename the pane.
+    pub(super) last_agent_click: Option<(String, std::time::Instant)>,
     pub(super) selection_autoscroll: Option<ClientSelectionAutoscroll>,
     pub(super) selection_autoscroll_deadline: Option<std::time::Instant>,
     pub(super) selection_highlight_clear_deadline: Option<std::time::Instant>,
@@ -1065,6 +1080,7 @@ impl ClientShellState {
             replaying_url_click: false,
             selection: None,
             last_pane_click: None,
+            last_agent_click: None,
             selection_autoscroll: None,
             selection_autoscroll_deadline: None,
             selection_highlight_clear_deadline: None,

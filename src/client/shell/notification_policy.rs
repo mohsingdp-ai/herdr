@@ -83,14 +83,42 @@ impl ClientShellState {
         let Some(pane_id) = notification.event.pane_id else {
             return;
         };
-        if notification.endpoint_id == self.active_endpoint_id {
+        self.focus_notified_pane(notification.endpoint_id, pane_id, outcome);
+    }
+
+    /// A clicked desktop notification: select the pane that raised it.
+    pub(crate) fn focus_clicked_notification(
+        &mut self,
+        endpoint_id: ClientEndpointId,
+        pane_id: String,
+    ) -> ClientShellInput {
+        let mut outcome = ClientShellInput {
+            repaint: true,
+            ..Default::default()
+        };
+        if self.endpoint_is_online(&endpoint_id) {
+            self.focus_notified_pane(endpoint_id, pane_id, &mut outcome);
+        } else {
+            let label = self.endpoint_label(&endpoint_id).to_owned();
+            self.receive_endpoint_unavailable(format!("{label} is unavailable"));
+        }
+        outcome
+    }
+
+    fn focus_notified_pane(
+        &mut self,
+        endpoint_id: ClientEndpointId,
+        pane_id: String,
+        outcome: &mut ClientShellInput,
+    ) {
+        if endpoint_id == self.active_endpoint_id {
             self.push_endpoint_method(
                 crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id }),
                 outcome,
             );
-        } else if self.endpoint_is_online(&notification.endpoint_id) {
+        } else if self.endpoint_is_online(&endpoint_id) {
             outcome.actions.push(ClientShellAction::ActivateEndpoint {
-                endpoint_id: notification.endpoint_id,
+                endpoint_id,
                 target: Some(ClientEndpointFocusTarget::Pane(pane_id)),
             });
         }
@@ -230,6 +258,10 @@ impl ClientShellState {
                 }
                 crate::config::ToastDelivery::System if !suppress_external => {
                     effects.push(ClientShellNotificationEffect::System {
+                        target: pending
+                            .event
+                            .pane_id
+                            .map(|pane_id| (pending.endpoint_id, pane_id)),
                         title: pending.event.title,
                         body: pending.event.body,
                     });

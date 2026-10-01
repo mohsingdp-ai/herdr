@@ -399,9 +399,10 @@ pub(super) fn agent_row(
     let tab_label = tab
         .filter(|tab| tab_count > 1 || tab.custom_label)
         .map(|tab| tab.label.as_str());
-    let agent_label = agent
-        .display_agent
-        .as_deref()
+    // A name the user gave the pane beats whatever the agent reports.
+    let agent_label = pane
+        .and_then(|pane| pane.label.as_deref())
+        .or(agent.display_agent.as_deref())
         .or(agent.name.as_deref())
         .or(agent.agent.as_deref())
         .or(agent.title.as_deref());

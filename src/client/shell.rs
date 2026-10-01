@@ -31,11 +31,13 @@ mod preferences;
 mod render;
 mod scroll;
 mod settings;
+mod space_picker;
 mod state;
 mod surface_patch;
 mod text_editor;
 mod word_selection;
 mod worktrees;
+use space_picker::{ClientSpacePickerOverlay, ClientSpacePickerRow};
 use text_editor::TextEditor;
 use word_selection::ClientWordSelection;
 

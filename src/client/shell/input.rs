@@ -481,6 +481,10 @@ impl ClientShellState {
                     search_focused: true,
                     ..
                 }))
+                | Some(ClientShellOverlay::SpacePicker(ClientSpacePickerOverlay {
+                    opening: false,
+                    ..
+                }))
         )
     }
 

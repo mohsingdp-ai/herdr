@@ -30,5 +30,12 @@ pub(super) enum ClientLoopEvent {
         /// latest target have the same identity after restoration.
         force: bool,
     },
+    /// The desktop folder picker answered.
+    FolderPicked(crate::platform::FolderPick),
+    /// A desktop notification for this pane was clicked.
+    NotificationClicked {
+        endpoint_id: endpoint::ClientEndpointId,
+        pane_id: String,
+    },
     Timer,
 }

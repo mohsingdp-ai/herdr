@@ -78,6 +78,8 @@ pub(super) struct ClientState {
     pub(super) draw_host_cursor: bool,
     pub(super) detached_process_children: Vec<std::process::Child>,
     pub(super) shell: Option<shell::ClientShellState>,
+    /// Feeds background results (e.g. a picked folder) back into the client loop.
+    pub(super) loop_events: Option<tokio::sync::mpsc::Sender<super::events::ClientLoopEvent>>,
 }
 
 impl Drop for ClientState {
@@ -133,6 +135,7 @@ impl ClientState {
             deferred_local_activation: None,
             draw_host_cursor: false,
             detached_process_children: Vec::new(),
+            loop_events: None,
             shell: Some(shell::ClientShellState::new(
                 shell::ClientShellConfig::from_config(&crate::config::Config::default()),
             )),

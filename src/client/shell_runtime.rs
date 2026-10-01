@@ -48,6 +48,8 @@ pub(super) fn dispatch_client_shell_actions(
                 }
             }
             shell::ClientShellAction::ReplayMouse(events) => replay_mouse.extend(events),
+            // Needs the loop's event sender; finish_client_shell_input starts it.
+            shell::ClientShellAction::PickFolder => {}
             shell::ClientShellAction::Keybind(action) => {
                 debug!(
                     ?action,
@@ -711,8 +713,19 @@ pub(super) fn finish_client_shell_input(
         query_host_terminal_theme();
     }
     sync_client_shell_keyboard_report_all(state)?;
+    let mut actions = outcome.actions;
+    let pick_folder = actions
+        .iter()
+        .any(|action| matches!(action, shell::ClientShellAction::PickFolder));
+    actions.retain(|action| !matches!(action, shell::ClientShellAction::PickFolder));
+    if let Some(events) = state.loop_events.clone().filter(|_| pick_folder) {
+        tokio::spawn(async move {
+            let pick = crate::platform::pick_folder("Open folder as a space").await;
+            let _ = events.send(ClientLoopEvent::FolderPicked(pick)).await;
+        });
+    }
     let (replay, dispatch_repaint) = dispatch_client_shell_actions(
-        outcome.actions,
+        actions,
         endpoint_commands,
         endpoints,
         state.shell.as_mut(),

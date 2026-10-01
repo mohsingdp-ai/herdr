@@ -331,6 +331,51 @@ mod tests {
     }
 
     #[test]
+    fn clicking_a_system_notification_selects_its_pane() {
+        let mut config = ClientShellConfig::from_config(&Config::default());
+        config.toast_delivery = crate::config::ToastDelivery::System;
+        config.toast_delay_seconds = 0;
+        let mut state = ClientShellState::new(config);
+        state.set_snapshot(Box::new(super::super::tests::snapshot()));
+        // The terminal window is in the background, so the desktop is told.
+        state.outer_focused = Some(false);
+        let now = std::time::Instant::now();
+        let event = SemanticNotification {
+            kind: SemanticNotificationKind::Custom,
+            title: "review ready".into(),
+            body: None,
+            sound: None,
+            agent: None,
+            workspace_id: Some("ws_1".into()),
+            tab_id: Some("tab_1".into()),
+            pane_id: Some("pane_1".into()),
+            position: None,
+        };
+        let (mut effects, _) = state.receive_notification(&ClientEndpointId::Local, event, now);
+        effects.extend(state.tick_notifications(now).0);
+        assert!(
+            effects.iter().any(|effect| matches!(
+                effect,
+                ClientShellNotificationEffect::System {
+                    target: Some((ClientEndpointId::Local, pane_id)),
+                    ..
+                } if pane_id == "pane_1"
+            )),
+            "system notification should carry its pane"
+        );
+
+        let clicked = state.focus_clicked_notification(ClientEndpointId::Local, "pane_1".into());
+        assert!(matches!(
+            &clicked.actions[..],
+            [ClientShellAction::Endpoint { request, .. }]
+                if matches!(
+                    &request.method,
+                    crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_1"
+                )
+        ));
+    }
+
+    #[test]
     fn finished_hint_waits_for_the_projected_completion_snapshot() {
         let mut config = ClientShellConfig::from_config(&Config::default());
         config.toast_delivery = crate::config::ToastDelivery::Terminal;

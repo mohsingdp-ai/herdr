@@ -523,3 +523,158 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close(
             if params.workspace_id == "ws_1" && params.close_group
     ));
 }
+
+#[test]
+fn space_picker_reopens_filtered_closed_spaces_and_opens_folders() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("sidebar frame");
+    let click = |state: &mut ClientShellState, rect: Rect| {
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x + 1,
+            row: rect.y,
+            modifiers: KeyModifiers::empty(),
+        })])
+    };
+    let screen_text = |state: &mut ClientShellState| {
+        let frame = state.compose(106, 30).expect("picker frame");
+        frame
+            .cells
+            .chunks(frame.width as usize)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // The ↺ footer icon lists closed spaces from the server.
+    let icon = state.hits.space_picker;
+    assert!(screen_text(&mut state).contains('↺'));
+    let open = click(&mut state, icon);
+    let [ClientShellAction::Endpoint { request, .. }] = &open.actions[..] else {
+        panic!("space picker should list closed spaces over the endpoint API");
+    };
+    assert!(matches!(
+        request.method,
+        crate::api::schema::Method::WorkspaceClosedList(_)
+    ));
+    let closed = |closed_id: &str, label: &str| crate::api::schema::ClosedWorkspaceInfo {
+        closed_id: closed_id.into(),
+        label: label.into(),
+        cwd: format!("/work/{label}"),
+        tab_count: 1,
+        closed_at: 0,
+    };
+    state.handle_endpoint_result(
+        "boot-1",
+        &request.id,
+        Ok(crate::api::schema::ResponseResult::ClosedWorkspaceList {
+            workspaces: vec![closed("w_a", "scratch"), closed("w_b", "notes")],
+        }),
+    );
+    let text = screen_text(&mut state);
+    for expected in [
+        "search closed spaces",
+        "scratch",
+        "/work/notes",
+        "new space",
+        "open folder…",
+    ] {
+        assert!(text.contains(expected), "missing {expected}:\n{text}");
+    }
+
+    // Typing filters; Enter reopens the highlighted match.
+    state.handle_input_bytes(b"not");
+    let Some(ClientShellOverlay::SpacePicker(picker)) = &state.overlay else {
+        panic!("picker should stay open while searching");
+    };
+    assert_eq!(
+        picker.rows(),
+        [
+            ClientSpacePickerRow::Closed(1),
+            ClientSpacePickerRow::NewSpace,
+            ClientSpacePickerRow::OpenFolder,
+        ]
+    );
+    let reopen = state.handle_input_bytes(b"\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &reopen.actions[..] else {
+        panic!("Enter should reopen over the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorkspaceReopen(params)
+            if params.closed_id.as_deref() == Some("w_b") && params.focus
+    ));
+    state.handle_endpoint_result(
+        "boot-1",
+        &request.id,
+        Ok(crate::api::schema::ResponseResult::Ok {}),
+    );
+    assert!(state.overlay.is_none());
+
+    // "open folder…" asks for a path and opens it as a new space.
+    let open = click(&mut state, icon);
+    let [ClientShellAction::Endpoint { request, .. }] = &open.actions[..] else {
+        panic!("space picker should list closed spaces");
+    };
+    state.handle_endpoint_result(
+        "boot-1",
+        &request.id,
+        Ok(crate::api::schema::ResponseResult::ClosedWorkspaceList {
+            workspaces: Vec::new(),
+        }),
+    );
+    assert!(screen_text(&mut state).contains("no closed spaces yet"));
+    let folder_row = state
+        .hits
+        .worktree_rows
+        .iter()
+        .find(|(_, position)| *position == 1)
+        .map(|(rect, _)| *rect)
+        .expect("open folder row");
+    // Locally it asks the desktop's folder picker.
+    let pick = click(&mut state, folder_row);
+    assert!(matches!(&pick.actions[..], [ClientShellAction::PickFolder]));
+    assert!(state.overlay.is_none());
+    let picked =
+        state.receive_folder_pick(crate::platform::FolderPick::Picked("/work/picked".into()));
+    let [ClientShellAction::Endpoint { request, .. }] = &picked.actions[..] else {
+        panic!("a picked folder should create a workspace");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorkspaceCreate(params)
+            if params.cwd.as_deref() == Some("/work/picked") && params.focus
+    ));
+    assert!(state
+        .receive_folder_pick(crate::platform::FolderPick::Cancelled)
+        .actions
+        .is_empty());
+
+    // Without a picker it falls back to a typed path.
+    state.receive_folder_pick(crate::platform::FolderPick::Unavailable);
+    let Some(ClientShellOverlay::Rename(rename)) = &mut state.overlay else {
+        panic!("open folder should ask for a path");
+    };
+    assert_eq!(rename.title, "open folder");
+    rename.input = TextEditor::from("/work/new-project");
+    let create = state.handle_input_bytes(b"\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &create.actions[..] else {
+        panic!("open folder should create a workspace over the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorkspaceCreate(params)
+            if params.cwd.as_deref() == Some("/work/new-project") && params.focus
+    ));
+    // `~` is this machine's home for a local server; other `~` forms pass through.
+    if let Ok(home) = std::env::var("HOME") {
+        assert_eq!(state.open_folder_path(" ~/code "), format!("{home}/code"));
+    }
+    assert_eq!(state.open_folder_path("~other/code"), "~other/code");
+}

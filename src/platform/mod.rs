@@ -343,6 +343,31 @@ pub(crate) fn begin_cli_output() {}
 #[cfg(not(unix))]
 pub(crate) fn end_cli_output() {}
 
+/// Outcome of asking the desktop for a folder.
+#[derive(Debug)]
+pub(crate) enum FolderPick {
+    Picked(std::path::PathBuf),
+    Cancelled,
+    /// No native picker here; the caller asks for a typed path instead.
+    Unavailable,
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) async fn pick_folder(_title: &str) -> FolderPick {
+    FolderPick::Unavailable
+}
+
+/// Desktop notification whose click calls `on_click`; platforms without click
+/// support just show it.
+#[cfg(not(target_os = "linux"))]
+pub fn show_clickable_desktop_notification(
+    title: &str,
+    body: Option<&str>,
+    _on_click: Box<dyn FnOnce() + Send>,
+) -> std::io::Result<bool> {
+    show_desktop_notification(title, body)
+}
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]

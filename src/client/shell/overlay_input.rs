@@ -423,10 +423,18 @@ impl ClientShellState {
     }
 
     pub(super) fn open_rename_pane_overlay(&mut self) {
-        let Some(snapshot) = self.snapshot.as_deref() else {
+        let Some(pane_id) = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.focused_pane_id.clone())
+        else {
             return;
         };
-        let Some(pane_id) = snapshot.focused_pane_id.as_deref() else {
+        self.open_rename_pane_overlay_for(&pane_id);
+    }
+
+    pub(super) fn open_rename_pane_overlay_for(&mut self, pane_id: &str) {
+        let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
         let Some(pane) = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id) else {
@@ -445,7 +453,7 @@ impl ClientShellState {
     }
 
     pub(super) fn insert_overlay_text(&mut self, text: &str) -> bool {
-        if self.insert_worktree_overlay_text(text) {
+        if self.insert_worktree_overlay_text(text) || self.insert_space_picker_text(text) {
             return true;
         }
         match self.overlay.as_mut() {
@@ -625,7 +633,9 @@ impl ClientShellState {
             return;
         }
 
-        if self.route_worktree_overlay_key(key, outcome) {
+        if self.route_worktree_overlay_key(key, outcome)
+            || self.route_space_picker_key(key, outcome)
+        {
             return;
         }
         if matches!(self.overlay, Some(ClientShellOverlay::Navigator(_))) {
@@ -980,6 +990,17 @@ impl ClientShellState {
                     label: Some(trimmed.to_owned()),
                 },
             )),
+            ClientRenameTarget::OpenFolder => (!trimmed.is_empty()).then(|| {
+                crate::api::schema::Method::WorkspaceCreate(
+                    crate::api::schema::WorkspaceCreateParams {
+                        source_workspace_id: None,
+                        cwd: Some(self.open_folder_path(trimmed)),
+                        focus: true,
+                        label: None,
+                        env: Default::default(),
+                    },
+                )
+            }),
         };
         if let Some(method) = method {
             self.push_endpoint_method(method, outcome);

@@ -624,6 +624,19 @@ pub(crate) fn render_sidebar(
             launcher_width,
             1,
         );
+        // ↺ space picker (reopen a closed space, new space, open folder),
+        // left of the menu launcher when there is room.
+        if workspace_area.width >= 5 + 3 + launcher_width {
+            hits.space_picker = Rect::new(hits.global_launcher.x.saturating_sub(3), footer_y, 3, 1);
+            put_text(
+                buffer,
+                hits.space_picker.x + 1,
+                footer_y,
+                1,
+                "↺",
+                Style::default().fg(palette.overlay0),
+            );
+        }
         if attention {
             let start_x = workspace_area.right().saturating_sub(6);
             put_text(

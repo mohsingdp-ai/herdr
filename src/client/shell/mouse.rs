@@ -1489,6 +1489,26 @@ impl ClientShellState {
             }
             return;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::SpacePicker(_))) {
+            let row_hit = self
+                .hits
+                .worktree_rows
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .map(|(_, position)| *position);
+            match mouse.kind {
+                MouseEventKind::ScrollUp => self.move_space_picker_selection(-1),
+                MouseEventKind::ScrollDown => self.move_space_picker_selection(1),
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(position) = row_hit {
+                        self.activate_space_picker_row(Some(position), outcome);
+                    }
+                }
+                _ => return,
+            }
+            outcome.repaint = true;
+            return;
+        }
         if matches!(self.overlay, Some(ClientShellOverlay::Settings(_))) {
             if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
                 if let Some((_, section)) = self
@@ -2008,6 +2028,10 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if super::contains(self.hits.space_picker, point) {
+                    self.open_space_picker(outcome);
+                    return;
+                }
                 if super::contains(self.hits.new_workspace, point) {
                     self.record_binding(
                         crate::input::KeybindMatch::Action(
@@ -2136,6 +2160,17 @@ impl ClientShellState {
                     .find(|(rect, _)| super::contains(*rect, point))
                     .map(|(_, pane_id)| pane_id.clone());
                 if let Some(pane_id) = agent_pane_id {
+                    let now = std::time::Instant::now();
+                    let double_click = self.last_agent_click.take().is_some_and(|(last, at)| {
+                        last == pane_id
+                            && now.duration_since(at) <= std::time::Duration::from_millis(350)
+                    });
+                    if double_click {
+                        self.open_rename_pane_overlay_for(&pane_id);
+                        outcome.repaint = true;
+                        return;
+                    }
+                    self.last_agent_click = Some((pane_id.clone(), now));
                     self.push_endpoint_method(
                         crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
                             pane_id,

@@ -468,6 +468,7 @@ async fn run_client_loop(
         deferred_local_activation: None,
         draw_host_cursor,
         detached_process_children: Vec::new(),
+        loop_events: None,
         shell: config.shell_config.map(shell::ClientShellState::new),
     };
     let mut federated = endpoint_catalog.has_enabled_ssh();
@@ -506,6 +507,7 @@ async fn run_client_loop(
 
     // Channel for events from the resize and server reader threads.
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<ClientLoopEvent>(256);
+    state.loop_events = Some(event_tx.clone());
     let (supervisor_tx, mut supervisor_rx) =
         tokio::sync::mpsc::channel::<endpoint::EndpointSupervisorEvent>(64);
     // Keep Windows console draining independent of server-frame backpressure.
@@ -1744,7 +1746,11 @@ async fn run_client_loop(
                                     .flatten();
                                 (effects, frame)
                             };
-                            handle_shell_notification_effects(effects, &state.sound_config);
+                            handle_shell_notification_effects(
+                                effects,
+                                &state.sound_config,
+                                &event_tx,
+                            );
                             if let Some(frame) = frame {
                                 state.present_frame(frame);
                             }
@@ -2155,6 +2161,45 @@ async fn run_client_loop(
                     io::Error::new(io::ErrorKind::UnexpectedEof, "connection was lost"),
                 );
             }
+            ClientLoopEvent::FolderPicked(pick) => {
+                if let Some(shell) = state.shell.as_mut() {
+                    let outcome = shell.receive_folder_pick(pick);
+                    let frame = shell.compose(state.reported_size.0, state.reported_size.1);
+                    if finish_client_shell_input(
+                        &mut state,
+                        outcome,
+                        frame,
+                        &mut write_stream,
+                        &mut pending_activation,
+                        &mut endpoint_commands,
+                        &mut prefix_input_source,
+                        &mut scheduled_activation,
+                    )? {
+                        return Ok(());
+                    }
+                }
+            }
+            ClientLoopEvent::NotificationClicked {
+                endpoint_id,
+                pane_id,
+            } => {
+                if let Some(shell) = state.shell.as_mut() {
+                    let outcome = shell.focus_clicked_notification(endpoint_id, pane_id);
+                    let frame = shell.compose(state.reported_size.0, state.reported_size.1);
+                    if finish_client_shell_input(
+                        &mut state,
+                        outcome,
+                        frame,
+                        &mut write_stream,
+                        &mut pending_activation,
+                        &mut endpoint_commands,
+                        &mut prefix_input_source,
+                        &mut scheduled_activation,
+                    )? {
+                        return Ok(());
+                    }
+                }
+            }
             ClientLoopEvent::Timer => {
                 client_timer.fired();
                 #[cfg(unix)]
@@ -2257,7 +2302,7 @@ async fn run_client_loop(
                             .flatten();
                         (effects, outcome, frame)
                     };
-                    handle_shell_notification_effects(effects, &state.sound_config);
+                    handle_shell_notification_effects(effects, &state.sound_config, &event_tx);
                     if finish_client_shell_input(
                         &mut state,
                         outcome,

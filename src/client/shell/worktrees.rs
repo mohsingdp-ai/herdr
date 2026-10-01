@@ -533,6 +533,8 @@ impl ClientShellState {
                 | PendingEndpointKind::ReloadConfig
                 | PendingEndpointKind::IntegrationList
                 | PendingEndpointKind::IntegrationInstall
+                | PendingEndpointKind::SpacePickerList
+                | PendingEndpointKind::SpacePickerReopen
                 | PendingEndpointKind::SelectionCopy
                 | PendingEndpointKind::PaneScroll { .. }
                 | PendingEndpointKind::WordSelection { .. }

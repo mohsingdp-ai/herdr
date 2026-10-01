@@ -1,6 +1,7 @@
 use super::*;
 
 mod settings_overlay;
+mod space_picker_overlay;
 mod worktree_overlays;
 
 #[derive(Default)]
@@ -78,6 +79,9 @@ pub(crate) fn render_client_overlay(
         }
         ClientShellOverlay::WorktreeRemove(v) => {
             worktree_overlays::render_worktree_remove_overlay(b, v, p)
+        }
+        ClientShellOverlay::SpacePicker(v) => {
+            space_picker_overlay::render_space_picker_overlay(b, v, p)
         }
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
     }

@@ -26,7 +26,9 @@ pub(crate) use super::unix_common::{
 #[cfg(test)]
 mod config_file_tests;
 
+mod folder_picker;
 mod shutdown;
+pub(crate) use folder_picker::pick_folder;
 pub(crate) use shutdown::monitor_host_shutdown;
 
 const WSL_MARKER_ENV_VARS: &[&str] = &["WSL_DISTRO_NAME", "WSL_INTEROP"];
@@ -910,6 +912,76 @@ fn show_desktop_notification_with_command(
         cmd.arg(body);
     }
     run_notification_command(cmd)
+}
+
+/// Desktop notification whose click calls `on_click` (herdr then selects the
+/// notifying pane). notify-send waits for the click on a background thread.
+pub fn show_clickable_desktop_notification(
+    title: &str,
+    body: Option<&str>,
+    on_click: Box<dyn FnOnce() + Send>,
+) -> std::io::Result<bool> {
+    show_clickable_desktop_notification_with_command(title, body, on_click, |program| {
+        Command::new(program)
+    })
+}
+
+fn show_clickable_desktop_notification_with_command(
+    title: &str,
+    body: Option<&str>,
+    on_click: Box<dyn FnOnce() + Send>,
+    mut command: impl FnMut(&str) -> Command + Send + 'static,
+) -> std::io::Result<bool> {
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return Ok(false);
+    }
+    let mut cmd = command("notify-send");
+    // `--action` makes notify-send wait and print the chosen action;
+    // "default" is a click on the notification itself.
+    cmd.arg("--app-name")
+        .arg("Herdr")
+        .arg("--action=default=Open")
+        .arg("--")
+        .arg(title);
+    if let Some(body) = body.filter(|body| !body.is_empty()) {
+        cmd.arg(body);
+    }
+    let mut child = match cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err),
+    };
+    let fallback_title = title.to_owned();
+    let fallback_body = body.map(str::to_owned);
+    // ponytail: one waiting thread per shown notification; it ends when the
+    // notification is clicked, dismissed or expires.
+    std::thread::spawn(move || {
+        let mut chosen = String::new();
+        if let Some(mut stdout) = child.stdout.take() {
+            let _ = stdout.read_to_string(&mut chosen);
+        }
+        match child.wait() {
+            Ok(status) if status.success() => {
+                if chosen.trim() == "default" {
+                    on_click();
+                }
+            }
+            // notify-send older than 0.7.10 rejects `--action`: show it plainly.
+            _ => {
+                let _ = show_desktop_notification_with_command(
+                    &fallback_title,
+                    fallback_body.as_deref(),
+                    &mut command,
+                );
+            }
+        }
+    });
+    Ok(true)
 }
 
 fn run_notification_command(mut command: Command) -> std::io::Result<bool> {
@@ -2129,6 +2201,81 @@ mod tests {
             b"BM text is not a bitmap"
         ));
         assert!(!bytes_match_image_signature("svg", b"<svg></svg>"));
+    }
+
+    #[test]
+    fn clicked_desktop_notification_calls_back_and_old_notify_send_falls_back() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            std::env::remove_var("WAYLAND_DISPLAY");
+            std::env::set_var("DISPLAY", ":0");
+        }
+        let args_path = std::env::temp_dir().join(format!(
+            "herdr-clickable-notify-args-{}",
+            std::process::id()
+        ));
+        // Stands in for notify-send: records its args and runs `$1` as the reply.
+        let fake = |reply: &'static str| {
+            let args_path = args_path.clone();
+            move |_: &str| {
+                let mut cmd = Command::new("sh");
+                cmd.arg("-c")
+                    .arg("printf '%s\\n' \"$@\" >> \"$HERDR_NOTIFY_ARGS\"; eval \"$HERDR_NOTIFY_REPLY\"")
+                    .arg("notify-send")
+                    .env("HERDR_NOTIFY_ARGS", &args_path)
+                    .env("HERDR_NOTIFY_REPLY", reply);
+                cmd
+            }
+        };
+
+        let (clicked_tx, clicked_rx) = std::sync::mpsc::channel();
+        let shown = show_clickable_desktop_notification_with_command(
+            "done",
+            Some("claude finished"),
+            Box::new(move || clicked_tx.send(()).unwrap()),
+            fake("echo default"),
+        )
+        .expect("notification command should spawn");
+        assert!(shown);
+        clicked_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("a click should call back");
+        let args = std::fs::read_to_string(&args_path).expect("args file");
+        assert_eq!(
+            args,
+            "--app-name\nHerdr\n--action=default=Open\n--\ndone\nclaude finished\n"
+        );
+        let _ = std::fs::remove_file(&args_path);
+
+        // Dismissed or expired: no callback.
+        let (clicked_tx, clicked_rx) = std::sync::mpsc::channel::<()>();
+        show_clickable_desktop_notification_with_command(
+            "done",
+            None,
+            Box::new(move || clicked_tx.send(()).unwrap()),
+            fake("true"),
+        )
+        .unwrap();
+        assert!(clicked_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .is_err());
+        let _ = std::fs::remove_file(&args_path);
+
+        // notify-send without --action support fails; the plain form is shown.
+        show_clickable_desktop_notification_with_command(
+            "done",
+            None,
+            Box::new(|| {}),
+            fake("case \"$*\" in *--action*) exit 1;; esac"),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let plain = "--app-name\nHerdr\n--\ndone\n";
+        while !std::fs::read_to_string(&args_path).is_ok_and(|args| args.ends_with(plain)) {
+            assert!(std::time::Instant::now() < deadline, "no plain fallback");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let _ = std::fs::remove_file(&args_path);
     }
 
     #[test]

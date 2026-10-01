@@ -366,6 +366,7 @@ impl ClientShellState {
             | crate::api::schema::Method::PaneFocus(_)
             | crate::api::schema::Method::PaneFocusDirection(_) => true,
             crate::api::schema::Method::WorkspaceCreate(params) => params.focus,
+            crate::api::schema::Method::WorkspaceReopen(params) => params.focus,
             crate::api::schema::Method::TabCreate(params) => params.focus,
             crate::api::schema::Method::PaneSplit(params) => params.focus,
             _ => false,
@@ -823,6 +824,10 @@ impl ClientShellState {
             kind @ (PendingEndpointKind::IntegrationList
             | PendingEndpointKind::IntegrationInstall) => {
                 return self.handle_settings_endpoint_result(kind, result);
+            }
+            kind @ (PendingEndpointKind::SpacePickerList
+            | PendingEndpointKind::SpacePickerReopen) => {
+                return (self.handle_space_picker_result(kind, result), Vec::new());
             }
             kind => {
                 let mut outcome = ClientShellInput::default();

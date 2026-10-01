@@ -1646,3 +1646,91 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(state.visible_notification.is_none());
     assert_eq!(state.pending_notifications.len(), 1);
 }
+
+#[test]
+fn double_clicking_an_agent_row_renames_its_pane() {
+    let mut projected = snapshot();
+    projected.panes[0].label = Some("reviewer".into());
+    projected.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("reviewer".into()),
+        display_agent: None,
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    }];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("agent frame");
+    let (row, _) = state.hits.agents[0].clone();
+    let click = |state: &mut ClientShellState| {
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.x + 1,
+            row: row.y,
+            modifiers: KeyModifiers::empty(),
+        })])
+    };
+
+    // A single click still jumps to the pane.
+    let first = click(&mut state);
+    assert!(matches!(
+        &first.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method, crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_1")
+    ));
+    assert!(state.overlay.is_none());
+
+    let second = click(&mut state);
+    assert!(second.actions.is_empty());
+    let Some(ClientShellOverlay::Rename(rename)) = &state.overlay else {
+        panic!("double click should open the pane rename dialog");
+    };
+    assert_eq!(rename.title, "rename pane");
+    assert_eq!(rename.input.as_str(), "reviewer");
+    assert!(matches!(&rename.target, ClientRenameTarget::Pane { pane_id } if pane_id == "pane_1"));
+}
+
+#[test]
+fn a_renamed_pane_shows_its_new_name_over_the_agent_name() {
+    let mut projected = snapshot();
+    projected.panes[0].label = Some("lead".into());
+    projected.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("orchestrator".into()),
+        display_agent: None,
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    }];
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("agent frame");
+    let text = frame
+        .cells
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect::<String>();
+    assert!(text.contains("lead"), "{text}");
+    assert!(!text.contains("orchestrator"), "{text}");
+}
