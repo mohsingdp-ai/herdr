@@ -1734,3 +1734,34 @@ fn a_renamed_pane_shows_its_new_name_over_the_agent_name() {
     assert!(text.contains("lead"), "{text}");
     assert!(!text.contains("orchestrator"), "{text}");
 }
+
+#[test]
+fn agent_row_right_click_menu_copies_pane_id() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+    let row = Rect::new(0, 2, 20, 1);
+    state.hits.agents = vec![(row, "pane_1".into())];
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: row.x,
+        row: row.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let index = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::CopyPaneId)
+            .expect("copy pane id item"),
+        _ => panic!("agent row should open pane context menu"),
+    };
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+    assert!(matches!(
+        &outcome.actions[..],
+        [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"pane_1"
+    ));
+}

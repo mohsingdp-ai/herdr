@@ -71,6 +71,7 @@ impl ClientContextMenuOverlay {
                         },
                         Action::ToggleRightClickPassthrough,
                     ),
+                    item("Copy pane id", Action::CopyPaneId),
                     item("Close pane", Action::ClosePane),
                 ]);
                 items
@@ -456,6 +457,12 @@ impl ClientShellState {
                 }),
                 outcome,
             ),
+            ClientContextMenuAction::CopyPaneId => {
+                self.show_copy_feedback(std::time::Instant::now());
+                outcome
+                    .actions
+                    .push(ClientShellAction::ClipboardWrite(pane_id.into_bytes()));
+            }
             ClientContextMenuAction::ClosePane => {
                 self.push_endpoint_method(Method::PaneClose(PaneTarget { pane_id }), outcome)
             }

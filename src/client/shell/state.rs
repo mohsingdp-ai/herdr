@@ -533,6 +533,7 @@ pub(super) enum ClientContextMenuAction {
     SplitDown,
     Zoom,
     ToggleRightClickPassthrough,
+    CopyPaneId,
     ClosePane,
 }
 
