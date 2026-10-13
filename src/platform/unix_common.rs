@@ -8,6 +8,15 @@ pub(crate) fn classify_child_exit(status: &portable_pty::ExitStatus) -> super::C
     }
 }
 
+/// Opens `$VISUAL`/`$EDITOR` (fallback `vi`) on the current directory.
+pub(crate) fn project_editor_argv() -> std::io::Result<Vec<String>> {
+    Ok(vec![
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        r#"eval "exec ${VISUAL:-${EDITOR:-vi}} .""#.to_string(),
+    ])
+}
+
 pub(crate) fn read_fd(fd: std::os::fd::RawFd, data: &mut [u8]) -> std::io::Result<usize> {
     let result = unsafe { libc::read(fd, data.as_mut_ptr().cast(), data.len()) };
     if result < 0 {

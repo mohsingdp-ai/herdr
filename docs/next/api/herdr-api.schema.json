@@ -3341,6 +3341,18 @@
           ],
           "type": "object"
         },
+        "PaneToggleEditorParams": {
+          "properties": {
+            "pane_id": {
+              "description": "Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "PaneWaitForOutputParams": {
           "properties": {
             "lines": {
@@ -5729,6 +5741,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.toggle_editor",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneToggleEditorParams"
             }
           },
           "required": [

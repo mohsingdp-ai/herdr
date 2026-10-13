@@ -180,6 +180,13 @@ pub(crate) fn scrollback_editor_argv(_path: &std::path::Path) -> std::io::Result
     ))
 }
 
+pub(crate) fn project_editor_argv() -> std::io::Result<Vec<String>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "opening an editor is not supported on this platform",
+    ))
+}
+
 /// Unsupported platform stub.
 pub fn detach_server_daemon_command(_command: &mut Command) {}
 

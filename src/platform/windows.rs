@@ -1169,6 +1169,11 @@ pub(crate) fn scrollback_editor_argv(path: &std::path::Path) -> std::io::Result<
     scrollback_editor_argv_with_env(path, editor.as_deref())
 }
 
+/// Opens `%VISUAL%`/`%EDITOR%` (fallback Notepad) on the current directory.
+pub(crate) fn project_editor_argv() -> std::io::Result<Vec<String>> {
+    scrollback_editor_argv(std::path::Path::new("."))
+}
+
 fn scrollback_editor_argv_with_env(
     path: &std::path::Path,
     editor: Option<&str>,

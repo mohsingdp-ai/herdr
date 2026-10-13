@@ -34,6 +34,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "pane.selection.read",
     "pane.split",
     "pane.swap",
+    "pane.toggle_editor",
     "pane.zoom",
     "product_announcement.dismiss",
     "release_notes.dismiss",
@@ -306,6 +307,10 @@ mod tests {
         assert_eq!(
             actual.remove("workspace.reopen").as_deref(),
             Some("5a3ce9f80540fd104dd635df8bf8250a5da712942a26cf11c7548242b8e2e36d")
+        );
+        assert_eq!(
+            actual.remove("pane.toggle_editor").as_deref(),
+            Some("aa5bfd1d8e4599a0ad43e7e7379cb829aed77106bb7d06ccab3f5d95082102b8")
         );
 
         assert_eq!(

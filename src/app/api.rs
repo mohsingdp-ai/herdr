@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 mod agent_view;
 mod agents;
 mod closed_workspaces;
+mod editor;
 mod env;
 mod integrations;
 mod layouts;
@@ -1134,6 +1135,9 @@ impl App {
             Method::PaneClear(target) => return self.handle_pane_clear(request.id, target),
             Method::PaneEditScrollback(target) => {
                 return self.handle_pane_edit_scrollback(request.id, target);
+            }
+            Method::PaneToggleEditor(params) => {
+                return self.handle_pane_toggle_editor(request.id, params);
             }
             Method::PaneSelectionRead(params) => {
                 return self.handle_pane_selection_read(request.id, params);

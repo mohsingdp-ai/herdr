@@ -234,6 +234,7 @@ impl HeadlessServer {
                 | Method::PaneSplit(_)
                 | Method::TabClose(_)
                 | Method::TabCreate(_)
+                | Method::PaneToggleEditor(_)
                 | Method::WorkspaceClose(_)
                 | Method::WorkspaceCreate(_)
                 | Method::WorkspaceReopen(_)
@@ -269,6 +270,7 @@ impl HeadlessServer {
                 | Method::PaneZoom(_)
                 | Method::TabClose(_)
                 | Method::TabCreate(_)
+                | Method::PaneToggleEditor(_)
                 | Method::TabFocus(_)
                 | Method::TabMove(_)
                 | Method::TabRename(_)
@@ -303,6 +305,7 @@ impl HeadlessServer {
                 | Method::PaneZoom(_)
                 | Method::TabClose(_)
                 | Method::TabCreate(_)
+                | Method::PaneToggleEditor(_)
                 | Method::TabFocus(_)
                 | Method::WorkspaceClose(_)
                 | Method::WorkspaceCreate(_)
@@ -856,6 +859,7 @@ impl HeadlessServer {
             api::schema::Method::WorkspaceCreate(params) => params.focus,
             api::schema::Method::WorkspaceReopen(params) => params.focus,
             api::schema::Method::TabCreate(params) => params.focus,
+            api::schema::Method::PaneToggleEditor(_) => true,
             _ => false,
         };
         let inspect_pane_move = matches!(

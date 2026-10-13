@@ -2077,7 +2077,7 @@ fn pane_not_found(id: String, pane_id: &str) -> String {
 }
 
 impl App {
-    fn resolve_optional_pane(&self, pane_id: Option<&str>) -> Option<(usize, PaneId)> {
+    pub(super) fn resolve_optional_pane(&self, pane_id: Option<&str>) -> Option<(usize, PaneId)> {
         match pane_id {
             Some(pane_id) => self.parse_pane_id(pane_id),
             None => {

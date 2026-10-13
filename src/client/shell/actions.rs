@@ -364,7 +364,8 @@ impl ClientShellState {
             crate::api::schema::Method::WorkspaceFocus(_)
             | crate::api::schema::Method::TabFocus(_)
             | crate::api::schema::Method::PaneFocus(_)
-            | crate::api::schema::Method::PaneFocusDirection(_) => true,
+            | crate::api::schema::Method::PaneFocusDirection(_)
+            | crate::api::schema::Method::PaneToggleEditor(_) => true,
             crate::api::schema::Method::WorkspaceCreate(params) => params.focus,
             crate::api::schema::Method::WorkspaceReopen(params) => params.focus,
             crate::api::schema::Method::TabCreate(params) => params.focus,
@@ -1103,6 +1104,11 @@ impl ClientShellState {
             KeybindAction::EditScrollback => Some(Method::PaneEditScrollback(PaneTarget {
                 pane_id: focused_pane?,
             })),
+            KeybindAction::ToggleEditor => Some(Method::PaneToggleEditor(
+                crate::api::schema::PaneToggleEditorParams {
+                    pane_id: focused_pane,
+                },
+            )),
             KeybindAction::ResizePaneLeft
             | KeybindAction::ResizePaneDown
             | KeybindAction::ResizePaneUp
