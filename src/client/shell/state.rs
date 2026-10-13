@@ -100,8 +100,8 @@ pub(super) struct ShellHitMap {
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
-    /// Sidebar footer ↺: opens the space picker.
-    pub(super) space_picker: Rect,
+    /// Nested sidebar header: switches the spaces list and branch tree.
+    pub(super) space_view_toggle: Rect,
     /// Nested sidebar: show/hide chevrons for each space's agents.
     pub(super) space_agent_toggles: Vec<(Rect, String)>,
     pub(super) sidebar_divider: Rect,
@@ -879,6 +879,8 @@ pub(crate) struct ClientShellState {
     pub(super) sidebar_section_split: f32,
     pub(super) sidebar_section_split_manual: bool,
     pub(super) agent_panel_sort_manual: bool,
+    /// Nested sidebar view: branch tree instead of the plain list.
+    pub(super) space_tree: bool,
     pub(super) last_sidebar_divider_click: Option<std::time::Instant>,
     pub(super) chrome_drag: Option<ClientChromeDrag>,
     pub(super) workspace_press: Option<ClientWorkspacePress>,
@@ -1046,6 +1048,7 @@ impl ClientShellState {
             sidebar_section_split,
             sidebar_section_split_manual: preferences.sidebar_section_split.is_some(),
             agent_panel_sort_manual: preferences.agent_panel_sort.is_some(),
+            space_tree: preferences.space_tree,
             last_sidebar_divider_click: None,
             chrome_drag: None,
             workspace_press: None,

@@ -552,10 +552,10 @@ fn space_picker_reopens_filtered_closed_spaces_and_opens_folders() {
             .join("\n")
     };
 
-    // The ↺ footer icon lists closed spaces from the server.
-    let icon = state.hits.space_picker;
-    assert!(screen_text(&mut state).contains('↺'));
-    let open = click(&mut state, icon);
+    // The footer's "new" lists closed spaces from the server.
+    let new = state.hits.new_workspace;
+    assert!(!screen_text(&mut state).contains('↺'));
+    let open = click(&mut state, new);
     let [ClientShellAction::Endpoint { request, .. }] = &open.actions[..] else {
         panic!("space picker should list closed spaces over the endpoint API");
     };
@@ -618,7 +618,7 @@ fn space_picker_reopens_filtered_closed_spaces_and_opens_folders() {
     assert!(state.overlay.is_none());
 
     // "open folder…" asks for a path and opens it as a new space.
-    let open = click(&mut state, icon);
+    let open = click(&mut state, new);
     let [ClientShellAction::Endpoint { request, .. }] = &open.actions[..] else {
         panic!("space picker should list closed spaces");
     };

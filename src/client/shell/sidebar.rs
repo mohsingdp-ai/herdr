@@ -238,42 +238,73 @@ pub(crate) fn render_sidebar(
             .add_modifier(Modifier::BOLD),
     );
     if nested && workspace_area.height > 0 {
-        // Same grouped/priority switch the agent panel header has.
-        let label = "grouped";
-        let width = display_width(label).min(workspace_area.width);
-        let rect = Rect::new(
-            workspace_area.right().saturating_sub(width),
+        // Switches the compact list and the expanded tree.
+        let view = if state.space_tree { "tree" } else { "list" };
+        let view_width = display_width(view).min(workspace_area.width);
+        let view_rect = Rect::new(
+            workspace_area.right().saturating_sub(view_width),
             workspace_area.y,
-            width,
+            view_width,
             1,
         );
         if config.mouse_capture {
-            hits.agent_sort_toggle = rect;
+            hits.space_view_toggle = view_rect;
         }
         put_text(
             buffer,
-            rect.x,
-            rect.y,
-            rect.width,
-            label,
+            view_rect.x,
+            view_rect.y,
+            view_rect.width,
+            view,
             Style::default()
                 .fg(palette.overlay0)
                 .add_modifier(Modifier::BOLD),
         );
     }
-    let agents = if nested {
+    // Nested spaces draw as a branch tree: worktrees hang off their repo's
+    // branch line and status is the icon alone. The list keeps it compact (a
+    // lone agent rides on its space's line); the tree gives every agent a line
+    // and lets the repo's ⌃ fold the whole group.
+    let compact = nested && !state.space_tree;
+    let mut agents = if nested {
         crate::client::shell::agent_sidebar::agent_rows(snapshot, config, None)
     } else {
         Vec::new()
     };
+    if nested {
+        for row in agents.iter_mut().flat_map(|agent| agent.rows.iter_mut()) {
+            row.retain(|token| !matches!(token.kind, crate::ui::ResolvedTokenKind::StateText(_)));
+        }
+    }
+    let agents = agents;
     // ponytail: keyed by workspace id, so a folded space can reopen folded
     // under a reused id after restart; key by something stabler if that bites.
     let agents_key =
         |workspace: &ClientShellWorkspace| format!("agents:{}", workspace.workspace_id);
-    let has_agents = |workspace: &ClientShellWorkspace| {
+    let agent_count = |workspace: &ClientShellWorkspace| {
         agents
             .iter()
-            .any(|agent| agent.workspace_id == workspace.workspace_id)
+            .filter(|agent| agent.workspace_id == workspace.workspace_id)
+            .count()
+    };
+    let inline_agent = |workspace: &ClientShellWorkspace| {
+        (compact && agent_count(workspace) == 1)
+            .then(|| {
+                agents
+                    .iter()
+                    .find(|agent| agent.workspace_id == workspace.workspace_id)
+            })
+            .flatten()
+    };
+    // Only agents with lines of their own can be folded away.
+    let has_agents =
+        |workspace: &ClientShellWorkspace| agent_count(workspace) > usize::from(compact);
+    // A repo checkout folds with its worktree group.
+    let tree_group_folded = |workspace: &ClientShellWorkspace| {
+        nested
+            && workspace.worktree.as_ref().is_some_and(|worktree| {
+                !worktree.is_linked_worktree && state.collapsed_groups.contains(&worktree.key)
+            })
     };
     // A folded space hides its agents.
     let space_agents = |workspace: &ClientShellWorkspace| {
@@ -281,6 +312,8 @@ pub(crate) fn render_sidebar(
             .iter()
             .filter(|agent| agent.workspace_id == workspace.workspace_id)
             .filter(|_| !state.collapsed_groups.contains(&agents_key(workspace)))
+            .filter(|_| !tree_group_folded(workspace))
+            .filter(|_| inline_agent(workspace).is_none())
             .collect::<Vec<_>>()
     };
     let agent_height =
@@ -309,9 +342,18 @@ pub(crate) fn render_sidebar(
             .saturating_sub(WORKSPACE_HEADER_ROWS + 1),
     );
     hits.workspace_body = body;
+    // Tree: a repo with worktrees gets its branch on a line of its own.
+    let branch_line = |position: usize| {
+        nested
+            && entries.get(position).is_some_and(|entry| !entry.indented)
+            && entries
+                .get(position + 1)
+                .is_some_and(|entry| entry.indented)
+    };
     let row_heights = entries
         .iter()
-        .map(|entry| {
+        .enumerate()
+        .map(|(position, entry)| {
             snapshot
                 .workspaces
                 .get(entry.index)
@@ -325,12 +367,13 @@ pub(crate) fn render_sidebar(
                         .fold(space, |height, agent| {
                             height.saturating_add(agent_height(agent))
                         })
+                        .saturating_add(u16::from(branch_line(position)))
                 })
                 .unwrap_or(1)
         })
         .collect::<Vec<_>>();
-    // Nested: a divider line between spaces (worktree
-    // children stay attached).
+    // Nested: a divider line between spaces and, in the list, a blank line
+    // before each grouped worktree.
     let space_gap = if nested { 1 } else { config.spaces.row_gap };
     let gaps = entries
         .iter()
@@ -400,46 +443,59 @@ pub(crate) fn render_sidebar(
         // Nested: the branch sits at the right end of the name line, then the
         // show/hide-agents chevron, then any group toggle. Worktree children
         // already show their branch as the name.
-        let mut right =
-            rect.right()
-                .saturating_sub(if parent_group_key(snapshot, entry.index).is_some() {
-                    2
-                } else {
-                    1
+        // Nested, the repo's ⌃ folds its whole group instead: always in the
+        // tree, and in the list only once folded, so it can be unfolded.
+        let group_key = parent_group_key(snapshot, entry.index).filter(|_| !entry.indented);
+        let tree_group_key = group_key
+            .clone()
+            .filter(|key| nested && (!compact || state.collapsed_groups.contains(key)));
+        let show_group_toggle = group_key.is_some() && !nested;
+        let mut right = rect
+            .right()
+            .saturating_sub(if show_group_toggle { 2 } else { 1 });
+        let agents_toggle =
+            (nested && rect.height > 0 && (has_agents(workspace) || tree_group_key.is_some()))
+                .then(|| {
+                    let key = tree_group_key.unwrap_or_else(|| agents_key(workspace));
+                    let toggle = Rect::new(right.saturating_sub(1).max(rect.x), rect.y, 1, 1);
+                    put_text(
+                        buffer,
+                        toggle.x,
+                        toggle.y,
+                        1,
+                        if state.collapsed_groups.contains(&key) {
+                            "⌄"
+                        } else {
+                            "⌃"
+                        },
+                        // Same colour as the space name.
+                        if workspace.focused || dragged {
+                            Style::default()
+                                .fg(palette.text)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(palette.subtext0)
+                        },
+                    );
+                    right = toggle.x.saturating_sub(1).max(rect.x);
+                    (toggle, key)
                 });
-        let agents_toggle = (nested && rect.height > 0 && has_agents(workspace)).then(|| {
-            let key = agents_key(workspace);
-            let toggle = Rect::new(right.saturating_sub(1).max(rect.x), rect.y, 1, 1);
-            put_text(
-                buffer,
-                toggle.x,
-                toggle.y,
-                1,
-                if state.collapsed_groups.contains(&key) {
-                    "⌄"
-                } else {
-                    "⌃"
-                },
-                // Same colour as the space name.
-                if workspace.focused || dragged {
-                    Style::default()
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(palette.subtext0)
-                },
-            );
-            right = toggle.x.saturating_sub(1).max(rect.x);
-            (toggle, key)
-        });
+        let has_tree_children = branch_line(entry_position);
         let branch = workspace
             .branch
             .as_deref()
-            .filter(|_| nested && !entry.indented && rect.height > 0);
-        let name_rect = branch.map_or(rect, |branch| {
+            .filter(|_| nested && rect.height > 0 && !has_tree_children);
+        let mut right_segments = branch.map(|branch| {
+            // A grouped worktree is usually named after its branch; say it once.
+            let branch = if entry.indented && (!workspace.custom_label || workspace.label == branch)
+            {
+                ""
+            } else {
+                branch
+            };
             // Ahead/behind arrows follow the branch, as on the dropped git row.
             let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
-            let segments = [
+            vec![
                 (
                     branch.to_string(),
                     if workspace.focused {
@@ -464,11 +520,69 @@ pub(crate) fn render_sidebar(
                     },
                     palette.red,
                 ),
-            ];
-            let width = segments.iter().fold(0u16, |width, (text, _)| {
+            ]
+        });
+        // Tree: a second space on the repo's own checkout is not a worktree.
+        if nested
+            && entry.indented
+            && workspace
+                .worktree
+                .as_ref()
+                .is_some_and(|worktree| !worktree.is_linked_worktree)
+        {
+            right_segments = Some(vec![("≡".to_string(), palette.overlay0)]);
+        }
+        let segments_width = |segments: &[(String, ratatui::style::Color)]| {
+            segments.iter().fold(0u16, |width, (text, _)| {
                 width.saturating_add(display_width(text))
-            });
-            let x = right.saturating_sub(width).max(rect.x);
+            })
+        };
+        // Columns before the name: the dot's margin, or a tree branch.
+        let lead = if entry.indented { 6u16 } else { 1 };
+        let name_width = rows.first().map_or(0, |row| {
+            crate::ui::resolved_token_spans(
+                row,
+                (
+                    status_icon(status, config.status_indicators),
+                    Style::default(),
+                ),
+                Style::default(),
+                Style::default(),
+                Style::default(),
+                Style::default(),
+                palette,
+                usize::MAX,
+            )
+            .iter()
+            .fold(0u16, |width, span| {
+                width.saturating_add(display_width(&span.content))
+            })
+        });
+        let space_label = rows.first().and_then(|row| {
+            row.iter().find_map(|token| match &token.kind {
+                crate::ui::ResolvedTokenKind::Workspace(text) => Some(text.clone()),
+                _ => None,
+            })
+        });
+        // The name and dot come first: a branch that would squeeze them is
+        // dropped, leaving only its ahead/behind arrows.
+        if let Some(segments) = right_segments
+            .as_mut()
+            .filter(|segments| !segments[0].0.is_empty() && !rows.is_empty())
+        {
+            // The leading columns, then render_workspace_rows' 2-column margin.
+            let needed = lead.saturating_add(name_width).saturating_add(2);
+            let name_end = right
+                .saturating_sub(segments_width(segments))
+                .saturating_add(1);
+            if name_end.saturating_sub(rect.x) < needed {
+                segments[0].0.clear();
+            }
+        }
+        let right_segments =
+            right_segments.filter(|segments| segments.iter().any(|(text, _)| !text.is_empty()));
+        let name_rect = right_segments.as_ref().map_or(rect, |segments| {
+            let x = right.saturating_sub(segments_width(segments)).max(rect.x);
             segments.iter().fold(x, |cursor, (text, color)| {
                 put_segment(
                     buffer,
@@ -482,7 +596,7 @@ pub(crate) fn render_sidebar(
             // render_workspace_rows stops 2 columns short of its area: 1 column gap.
             Rect::new(rect.x, rect.y, (x + 1).saturating_sub(rect.x), rect.height)
         });
-        let name_rect = match (branch, &agents_toggle) {
+        let name_rect = match (&right_segments, &agents_toggle) {
             (None, Some(_)) => Rect::new(
                 rect.x,
                 rect.y,
@@ -507,10 +621,50 @@ pub(crate) fn render_sidebar(
             dragged,
             palette,
         );
+        if let Some(agent) = inline_agent(workspace) {
+            if agent.focused {
+                buffer.set_style(
+                    Rect::new(body.x, rect.y, content_width, 1),
+                    Style::default().bg(palette.surface0),
+                );
+            }
+            // Its name follows the space's, unless they match or it won't fit whole.
+            let name = agent
+                .rows
+                .iter()
+                .flatten()
+                .find_map(|token| match &token.kind {
+                    crate::ui::ResolvedTokenKind::Agent(text) => Some(text.as_str()),
+                    _ => None,
+                });
+            if let Some(name) = name.filter(|name| space_label.as_deref() != Some(*name)) {
+                let x = rect.x.saturating_add(lead).saturating_add(name_width);
+                let end = name_rect.right().saturating_sub(2);
+                if x.saturating_add(3).saturating_add(display_width(name)) <= end {
+                    let x = put_segment(
+                        buffer,
+                        x,
+                        rect.y,
+                        end,
+                        " · ",
+                        Style::default().fg(palette.overlay0),
+                    );
+                    put_segment(
+                        buffer,
+                        x,
+                        rect.y,
+                        end,
+                        name,
+                        Style::default().fg(palette.subtext0),
+                    );
+                }
+            }
+        }
         // The space's agents, indented under it; they scroll with it.
         let mut agent_y = rect.bottom();
-        // A dim guide runs down under the space's status dot; agents sit after it.
-        let guide = if entry.indented { 6 } else { 1 };
+        // A dim guide runs down under the space's status dot (or a tree
+        // worktree's dot); agents sit after it.
+        let guide = if nested && entry.indented { 6 } else { 1 };
         let indent = guide + 1;
         for agent in space_agents(workspace) {
             let height = agent_height(agent);
@@ -543,19 +697,74 @@ pub(crate) fn render_sidebar(
                     "│",
                     Style::default().fg(palette.overlay0),
                 );
+                // The tree trunk runs on past a worktree that has siblings below.
+                if nested && entry.indented && !entry.last_child {
+                    put_text(
+                        buffer,
+                        body.x.saturating_add(3),
+                        row,
+                        1,
+                        "│",
+                        Style::default().fg(palette.overlay0),
+                    );
+                }
             }
             hits.agents.push((agent_rect, agent.pane_id.clone()));
             agent_y = agent_y.saturating_add(height);
         }
+        if has_tree_children {
+            if agent_y < body.bottom() {
+                let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
+                let line_end = rect.right();
+                let mut x = body.x.saturating_add(3);
+                x = put_segment(
+                    buffer,
+                    x,
+                    agent_y,
+                    line_end,
+                    workspace.branch.as_deref().unwrap_or_default(),
+                    Style::default().fg(if workspace.focused {
+                        palette.mauve
+                    } else {
+                        palette.overlay0
+                    }),
+                );
+                if ahead > 0 {
+                    x = put_segment(
+                        buffer,
+                        x,
+                        agent_y,
+                        line_end,
+                        &format!(" ↑{ahead}"),
+                        Style::default().fg(palette.green),
+                    );
+                }
+                if behind > 0 {
+                    put_segment(
+                        buffer,
+                        x,
+                        agent_y,
+                        line_end,
+                        &format!(" ↓{behind}"),
+                        Style::default().fg(palette.red),
+                    );
+                }
+            }
+            agent_y = agent_y.saturating_add(1);
+        }
         let row_height = agent_y.saturating_sub(rect.y);
-        let group_toggle = render_parent_group_toggle(
-            buffer,
-            rect,
-            snapshot,
-            entry.index,
-            state.collapsed_groups,
-            palette,
-        );
+        let group_toggle = show_group_toggle
+            .then(|| {
+                render_parent_group_toggle(
+                    buffer,
+                    rect,
+                    snapshot,
+                    entry.index,
+                    state.collapsed_groups,
+                    palette,
+                )
+            })
+            .flatten();
         hits.workspaces.push(WorkspaceHit {
             rect,
             endpoint_id: ClientEndpointId::Local,
@@ -563,11 +772,10 @@ pub(crate) fn render_sidebar(
             indented: entry.indented,
             group_toggle,
         });
-        let gap = entries
-            .get(entry_position + 1)
-            .map_or(0, |next| u16::from(!next.indented) * space_gap);
+        let next = entries.get(entry_position + 1);
+        let gap = next.map_or(0, |next| u16::from(!next.indented) * space_gap);
         let divider_y = y.saturating_add(row_height);
-        if nested && gap > 0 && divider_y < body.bottom() {
+        if nested && next.is_some_and(|next| !next.indented) && divider_y < body.bottom() {
             put_text(
                 buffer,
                 body.x.saturating_add(1),
@@ -624,19 +832,6 @@ pub(crate) fn render_sidebar(
             launcher_width,
             1,
         );
-        // ↺ space picker (reopen a closed space, new space, open folder),
-        // left of the menu launcher when there is room.
-        if workspace_area.width >= 5 + 3 + launcher_width {
-            hits.space_picker = Rect::new(hits.global_launcher.x.saturating_sub(3), footer_y, 3, 1);
-            put_text(
-                buffer,
-                hits.space_picker.x + 1,
-                footer_y,
-                1,
-                "↺",
-                Style::default().fg(palette.overlay0),
-            );
-        }
         if attention {
             let start_x = workspace_area.right().saturating_sub(6);
             put_text(

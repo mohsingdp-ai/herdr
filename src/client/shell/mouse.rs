@@ -2015,6 +2015,12 @@ impl ClientShellState {
                     }
                     return;
                 }
+                if super::contains(self.hits.space_view_toggle, point) {
+                    self.space_tree = !self.space_tree;
+                    self.persist_chrome_preferences(outcome);
+                    outcome.repaint = true;
+                    return;
+                }
                 if super::contains(self.hits.agent_sort_toggle, point) {
                     let sort = match self.config.agent_panel_sort {
                         crate::config::AgentPanelSortConfig::Spaces => {
@@ -2039,17 +2045,10 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
-                if super::contains(self.hits.space_picker, point) {
-                    self.open_space_picker(outcome);
-                    return;
-                }
+                // "new" opens the space picker: reopen a closed space, new
+                // space, or open a folder.
                 if super::contains(self.hits.new_workspace, point) {
-                    self.record_binding(
-                        crate::input::KeybindMatch::Action(
-                            crate::input::KeybindAction::NewWorkspace,
-                        ),
-                        outcome,
-                    );
+                    self.open_space_picker(outcome);
                     return;
                 }
                 if super::contains(self.hits.new_tab, point) {

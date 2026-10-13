@@ -18,13 +18,15 @@ fn shell_new_controls_use_the_same_client_action_routes_as_keybinds() {
             row: new_workspace.y,
             modifiers: KeyModifiers::empty(),
         })]);
+    // The sidebar's "new" opens the space picker, which lists closed spaces.
     let [ClientShellAction::Endpoint { request, .. }] = &create_workspace.actions[..] else {
-        panic!("new workspace click should use the endpoint API");
+        panic!("new space click should use the endpoint API");
     };
     assert!(matches!(
         request.method,
-        crate::api::schema::Method::WorkspaceCreate(_)
+        crate::api::schema::Method::WorkspaceClosedList(_)
     ));
+    state.overlay = None;
 
     let new_tab = state.hits.new_tab;
     let open_new_tab =

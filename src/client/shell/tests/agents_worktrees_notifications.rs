@@ -678,6 +678,8 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
     config.ui.sidebar.agents.nested = true;
     config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    // The tree view gives every agent a line of its own.
+    state.space_tree = true;
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
 
@@ -1764,4 +1766,257 @@ fn agent_row_right_click_menu_copies_pane_id() {
         &outcome.actions[..],
         [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"pane_1"
     ));
+}
+
+#[test]
+fn list_view_is_a_compact_tree_with_lone_agents_on_their_space_line() {
+    let mut projected = snapshot();
+    projected.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut child = projected.workspaces[0].clone();
+    child.workspace_id = "ws_2".into();
+    child.label = "repo-v4".into();
+    child.branch = Some("worktree/v4".into());
+    child.focused = false;
+    child.agent_status = AgentStatus::Blocked;
+    child.worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    projected.workspaces.push(child.clone());
+    // A renamed worktree on a branch too long to share the row.
+    child.workspace_id = "ws_3".into();
+    child.label = "ui-polish".into();
+    child.custom_label = true;
+    child.branch = Some("feature/ui-polish-with-a-long-name".into());
+    child.git_ahead_behind = Some((5, 50));
+    child.agent_status = AgentStatus::Idle;
+    projected.workspaces.push(child);
+    let agent = |pane_id: &str, workspace_id: &str, name: &str| ClientShellAgent {
+        pane_id: pane_id.into(),
+        workspace_id: workspace_id.into(),
+        tab_id: "tab_1".into(),
+        name: Some(name.into()),
+        display_agent: None,
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    };
+    projected.agents = vec![
+        agent("pane_1", "ws_1", "alpha"),
+        agent("pane_2", "ws_2", "bravo"),
+    ];
+    projected.agents[1].agent_status = AgentStatus::Blocked;
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Spaces;
+    config.ui.sidebar.agents.nested = true;
+    config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+
+    let frame = state.compose(106, 40).expect("nested worktree frame");
+    let width = state.hits.workspace_body.width as usize;
+    let lines = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .take(width)
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let find = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
+    };
+    // A lone agent rides on its space's line; the branch gets its own line.
+    let parent = find("client-shell");
+    assert!(
+        lines[parent].starts_with(" ○ client-shell · alpha"),
+        "{lines:#?}"
+    );
+    assert!(lines[parent + 1].starts_with("   main"), "{lines:#?}");
+    // One line per worktree, icon only; the branch named "v4" is not repeated.
+    assert!(
+        lines[parent + 2].starts_with("   ├─ ● v4 · bravo"),
+        "{lines:#?}"
+    );
+    // A branch that would squeeze the name is dropped; its arrows stay.
+    assert!(
+        lines[parent + 3].starts_with("   └─ ○ ui-poli"),
+        "{lines:#?}"
+    );
+    assert!(lines[parent + 3].contains("↑5 ↓50"), "{lines:#?}");
+    for line in &lines {
+        assert!(
+            !line.contains("feature/") && !line.contains("blocked"),
+            "{lines:#?}"
+        );
+        // Nothing to fold: no space has two agents.
+        assert!(!line.contains('⌃') && !line.contains('⎇'), "{lines:#?}");
+    }
+}
+
+#[test]
+fn tree_view_hangs_worktrees_off_the_branch_line_with_icon_only_status() {
+    let mut projected = snapshot();
+    projected.workspaces[0].label = "repo".into();
+    projected.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut child = projected.workspaces[0].clone();
+    child.workspace_id = "ws_2".into();
+    child.label = "repo-v4".into();
+    child.branch = Some("worktree/v4".into());
+    child.focused = false;
+    child.agent_status = AgentStatus::Blocked;
+    child.worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    projected.workspaces.push(child.clone());
+    // A second space on the repo's own checkout, not a worktree.
+    child.workspace_id = "ws_3".into();
+    child.label = "notes".into();
+    child.custom_label = true;
+    child.branch = Some("main".into());
+    child.agent_status = AgentStatus::Idle;
+    child.worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    projected.workspaces.push(child);
+    let agent = |pane_id: &str, workspace_id: &str, name: &str| ClientShellAgent {
+        pane_id: pane_id.into(),
+        workspace_id: workspace_id.into(),
+        tab_id: "tab_1".into(),
+        name: Some(name.into()),
+        display_agent: None,
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    };
+    projected.agents = vec![
+        agent("pane_1", "ws_1", "alpha"),
+        agent("pane_2", "ws_2", "bravo"),
+        agent("pane_3", "ws_2", "charlie"),
+    ];
+    projected.agents[1].agent_status = AgentStatus::Blocked;
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Spaces;
+    config.ui.sidebar.agents.nested = true;
+    config.ui.sidebar.agents.rows = vec![vec![
+        crate::config::AgentSidebarToken::Agent,
+        crate::config::AgentSidebarToken::StateIcon,
+        crate::config::AgentSidebarToken::StateText,
+    ]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.space_tree = true;
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+
+    let frame = state.compose(106, 40).expect("tree frame");
+    let width = state.hits.workspace_body.width as usize;
+    let lines = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .take(width)
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let find = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
+    };
+    // The header keeps only the list/tree switch.
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with(" spaces") && line.trim_end().ends_with("tree")),
+        "{lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("grouped")),
+        "{lines:#?}"
+    );
+    // Agents keep their own lines; the branch gets its own line too.
+    let parent = find(" ○ repo");
+    assert!(lines[parent].contains('⌃'), "{lines:#?}");
+    assert!(lines[parent + 1].starts_with(" │ alpha · ○"), "{lines:#?}");
+    assert!(lines[parent + 2].starts_with("   main"), "{lines:#?}");
+    // Worktrees hang off it; the trunk runs past one with siblings below.
+    assert!(lines[parent + 3].starts_with("   ├─ ● v4"), "{lines:#?}");
+    assert!(
+        lines[parent + 4].starts_with("   │  │ bravo · ●"),
+        "{lines:#?}"
+    );
+    assert!(
+        lines[parent + 5].starts_with("   │  │ charlie · ○"),
+        "{lines:#?}"
+    );
+    assert!(lines[parent + 6].starts_with("   └─ ○ notes"), "{lines:#?}");
+    assert!(lines[parent + 6].contains('≡'), "{lines:#?}");
+    // Icon only: no status words, no ⎇ marks, no blank lines in the group.
+    for line in &lines[parent..=parent + 6] {
+        assert!(
+            !line.contains("blocked") && !line.contains("idle"),
+            "{lines:#?}"
+        );
+        assert!(!line.contains('⎇'), "{lines:#?}");
+    }
+
+    // The repo's ⌃ folds everything under it; its dot shows the worst inside.
+    state.collapsed_groups.insert("repo".into());
+    let frame = state.compose(106, 40).expect("folded tree frame");
+    let lines = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .take(width)
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let parent = lines
+        .iter()
+        .position(|line| line.starts_with(" ● repo"))
+        .unwrap_or_else(|| panic!("folded repo missing: {lines:#?}"));
+    // Folded, the branch is back on the repo's line.
+    assert!(lines[parent].contains("main ⌄"), "{lines:#?}");
+    for gone in ["alpha", "v4", "bravo", "notes"] {
+        assert!(
+            !lines.iter().any(|line| line.contains(gone)),
+            "{gone}: {lines:#?}"
+        );
+    }
 }
