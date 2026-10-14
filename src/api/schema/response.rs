@@ -4,6 +4,7 @@ use super::agents::AgentInfo;
 use super::checkpoints::CheckpointInfo;
 use super::common::{ClientWindowTitleReason, NotificationShowReason};
 use super::events::EventEnvelope;
+use super::git::{GitCommitFile, GitCommitInfo, GitFileDiff, GitStatusInfo};
 use super::integrations::{
     IntegrationInstallResult, IntegrationTarget, IntegrationUninstallResult,
 };
@@ -75,6 +76,23 @@ pub enum ResponseResult {
         checkpoint_id: String,
         /// Saved just before rewinding; restore it to undo the rewind.
         undo_checkpoint_id: String,
+    },
+    GitStatus {
+        status: GitStatusInfo,
+    },
+    GitDiff {
+        diff: GitFileDiff,
+    },
+    GitLog {
+        /// Newest first.
+        commits: Vec<GitCommitInfo>,
+        /// Older commits exist beyond the limit.
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        has_more: bool,
+    },
+    GitCommitFiles {
+        commit: String,
+        files: Vec<GitCommitFile>,
     },
     WorktreeList {
         source: WorktreeSourceInfo,

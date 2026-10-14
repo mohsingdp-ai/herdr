@@ -6,6 +6,7 @@ mod checkpoints;
 mod closed_workspaces;
 mod editor;
 mod env;
+pub(crate) mod git;
 mod integrations;
 mod layouts;
 mod panes;
@@ -1101,6 +1102,23 @@ impl App {
                     request.id,
                     "invalid_request",
                     "checkpoints are handled asynchronously by the app runtime",
+                );
+            }
+            Method::GitStatus(_)
+            | Method::GitDiff(_)
+            | Method::GitLog(_)
+            | Method::GitShow(_)
+            | Method::GitStage(_)
+            | Method::GitUnstage(_)
+            | Method::GitDiscard(_)
+            | Method::GitCommit(_)
+            | Method::GitUncommit(_)
+            | Method::GitPush(_)
+            | Method::GitPull(_) => {
+                return responses::encode_error(
+                    request.id,
+                    "invalid_request",
+                    "git requests are handled asynchronously by the app runtime",
                 );
             }
             Method::WorktreeList(_) | Method::WorktreeOpen(_) => {

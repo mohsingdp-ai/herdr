@@ -568,6 +568,40 @@ pub(crate) struct StatusCommandGuard {
     process_group_id: Option<i32>,
 }
 
+/// Starts a background command as the leader of its own process group, so
+/// stopping it also reaches what it started (hooks, ssh, filters).
+pub(crate) fn isolate_process_tree(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+/// Stops a command started with [`isolate_process_tree`]: SIGTERM to its
+/// group first, so git removes its lock files, then SIGKILL to whatever is
+/// left after `grace`.
+pub(crate) fn stop_process_tree(child: &mut std::process::Child, grace: std::time::Duration) {
+    let Ok(group) = i32::try_from(child.id()) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    };
+    // SAFETY: plain signal delivery to the group this command leads.
+    unsafe {
+        libc::kill(-group, libc::SIGTERM);
+    }
+    let deadline = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // SAFETY: as above; descendants may outlive the leader.
+    unsafe {
+        libc::kill(-group, libc::SIGKILL);
+    }
+    let _ = child.wait();
+}
+
 impl StatusCommandGuard {
     pub(crate) fn new(child: &tokio::process::Child) -> std::io::Result<Self> {
         let process_id = child

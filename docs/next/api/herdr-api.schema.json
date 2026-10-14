@@ -2185,6 +2185,274 @@
           ],
           "type": "object"
         },
+        "GitCommitParams": {
+          "properties": {
+            "all": {
+              "description": "Stage every change first, like `git commit -a` plus new files.",
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "The pane whose folder to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "root": {
+              "description": "The repository root the caller is showing: the change is refused when\nthe folder now resolves to a different repository.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose folder to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "type": "object"
+        },
+        "GitDiffParams": {
+          "properties": {
+            "commit": {
+              "description": "Diff the file as changed by this commit. Without it, diff the working tree.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "orig_path": {
+              "description": "The path before a rename, so both sides of the rename are diffed.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "description": "The pane whose folder to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "description": "Path relative to the repository root.",
+              "type": "string"
+            },
+            "workspace_id": {
+              "description": "The workspace whose folder to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "GitDiscardParams": {
+          "properties": {
+            "pane_id": {
+              "description": "The pane whose folder to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "paths": {
+              "description": "Paths relative to the repository root.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "root": {
+              "description": "The repository root the caller is showing: the change is refused when\nthe folder now resolves to a different repository.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose folder to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "paths"
+          ],
+          "type": "object"
+        },
+        "GitLogParams": {
+          "properties": {
+            "limit": {
+              "description": "Most commits to return, newest first. Defaults to 100; at most 500.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "description": "The pane whose folder to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose folder to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "GitPathsParams": {
+          "properties": {
+            "hunk": {
+              "description": "Only this hunk of the single path, by its `@@ … @@` header.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "description": "The pane whose folder to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "paths": {
+              "description": "Paths relative to the repository root. Include a rename's old path too.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "root": {
+              "description": "The repository root the caller is showing: the change is refused when\nthe folder now resolves to a different repository.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose folder to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "paths"
+          ],
+          "type": "object"
+        },
+        "GitShowParams": {
+          "properties": {
+            "commit": {
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "The pane whose folder to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose folder to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "commit"
+          ],
+          "type": "object"
+        },
+        "GitTarget": {
+          "description": "The folder a git request acts on: a workspace's folder, a pane's folder,\nor (with neither) the focused pane's folder.",
+          "properties": {
+            "pane_id": {
+              "description": "The pane whose folder to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "root": {
+              "description": "The repository root the caller is showing: the change is refused when\nthe folder now resolves to a different repository.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose folder to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "GitUncommitParams": {
+          "properties": {
+            "commit": {
+              "description": "Must still be HEAD and not pushed anywhere.",
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "The pane whose folder to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "root": {
+              "description": "The repository root the caller is showing: the change is refused when\nthe folder now resolves to a different repository.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose folder to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "commit"
+          ],
+          "type": "object"
+        },
         "IntegrationInstallParams": {
           "properties": {
             "target": {
@@ -5834,6 +6102,182 @@
         {
           "properties": {
             "method": {
+              "const": "git.status",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.diff",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitDiffParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.log",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitLogParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.show",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitShowParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.stage",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitPathsParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.unstage",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitPathsParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.discard",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitDiscardParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.commit",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitCommitParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.uncommit",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitUncommitParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.push",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "git.pull",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/GitTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.selection.read",
               "type": "string"
             },
@@ -7697,6 +8141,312 @@
           ],
           "type": "string"
         },
+        "GitChangeKind": {
+          "enum": [
+            "modified",
+            "added",
+            "deleted",
+            "renamed",
+            "copied",
+            "type_changed",
+            "untracked",
+            "conflicted",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "GitCommitFile": {
+          "properties": {
+            "binary": {
+              "type": "boolean"
+            },
+            "deletions": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "insertions": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "$ref": "#/schemas/success_response/$defs/GitChangeKind"
+            },
+            "orig_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "GitCommitInfo": {
+          "properties": {
+            "author": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string"
+            },
+            "deletions": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "files_changed": {
+              "default": 0,
+              "description": "Against the first parent.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "insertions": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "merge": {
+              "type": "boolean"
+            },
+            "pushed": {
+              "description": "Reachable from a remote-tracking branch.",
+              "type": "boolean"
+            },
+            "short_commit": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            },
+            "time": {
+              "description": "Author time, Unix seconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "commit",
+            "short_commit",
+            "author",
+            "time",
+            "subject"
+          ],
+          "type": "object"
+        },
+        "GitFileChange": {
+          "properties": {
+            "kind": {
+              "$ref": "#/schemas/success_response/$defs/GitChangeKind"
+            },
+            "orig_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "staged": {
+              "description": "The index differs from HEAD.",
+              "type": "boolean"
+            },
+            "unstaged": {
+              "description": "The working tree differs from the index (always true for untracked files).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "GitFileDiff": {
+          "properties": {
+            "binary": {
+              "type": "boolean"
+            },
+            "hunks": {
+              "default": [],
+              "description": "Working tree against the index, or the commit against its first parent.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/GitHunk"
+              },
+              "type": "array"
+            },
+            "path": {
+              "type": "string"
+            },
+            "staged_hunks": {
+              "description": "Index against HEAD. Empty for a commit.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/GitHunk"
+              },
+              "type": "array"
+            },
+            "truncated": {
+              "description": "The diff was cut short; very long lines are cut too.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "GitHunk": {
+          "description": "One `@@` hunk. `lines` are raw unified-diff lines: the first character is\n' ', '+', '-' or '\\' (the \"no newline at end of file\" marker).",
+          "properties": {
+            "header": {
+              "type": "string"
+            },
+            "lines": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "new_start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "old_start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "header",
+            "old_start",
+            "new_start",
+            "lines"
+          ],
+          "type": "object"
+        },
+        "GitOperationInfo": {
+          "description": "A commit, push or pull running in the background: `git.commit`,\n`git.push` and `git.pull` answer as soon as it starts.",
+          "properties": {
+            "error": {
+              "description": "Why it failed, once it has.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "description": "Unique per server run.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "$ref": "#/schemas/success_response/$defs/GitOperationKind"
+            },
+            "running": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "GitOperationKind": {
+          "enum": [
+            "commit",
+            "push",
+            "pull",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "GitStatusInfo": {
+          "properties": {
+            "ahead": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "behind": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "branch": {
+              "description": "The checked-out branch; none when HEAD is detached.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "files": {
+              "default": [],
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/GitFileChange"
+              },
+              "type": "array"
+            },
+            "head": {
+              "description": "The HEAD commit; none before the first commit.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/GitOperationInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The latest commit, push or pull started through `git.*`, while it runs\nand after it finished."
+            },
+            "root": {
+              "description": "The repository root.",
+              "type": "string"
+            },
+            "truncated": {
+              "description": "More files changed than were listed.",
+              "type": "boolean"
+            },
+            "upstream": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "root"
+          ],
+          "type": "object"
+        },
         "InstalledPluginInfo": {
           "properties": {
             "actions": {
@@ -9548,6 +10298,85 @@
                 "type",
                 "checkpoint_id",
                 "undo_checkpoint_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "status": {
+                  "$ref": "#/schemas/success_response/$defs/GitStatusInfo"
+                },
+                "type": {
+                  "const": "git_status",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "status"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "diff": {
+                  "$ref": "#/schemas/success_response/$defs/GitFileDiff"
+                },
+                "type": {
+                  "const": "git_diff",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "diff"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "commits": {
+                  "description": "Newest first.",
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/GitCommitInfo"
+                  },
+                  "type": "array"
+                },
+                "has_more": {
+                  "description": "Older commits exist beyond the limit.",
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "git_log",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "commits"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "commit": {
+                  "type": "string"
+                },
+                "files": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/GitCommitFile"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "git_commit_files",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "commit",
+                "files"
               ],
               "type": "object"
             },

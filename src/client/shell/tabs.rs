@@ -244,6 +244,90 @@ fn tab_bar_status_area(snapshot: &ClientShellSnapshot, area: Rect) -> Option<Rec
         .then(|| Rect::new(area.right().saturating_sub(width), area.y, width, 1))
 }
 
+/// While the git view is in front of a space: its real tabs step back and a
+/// git tab is drawn after them, in front, with the new-tab button after it.
+pub(in crate::client::shell) fn render_git_tab(
+    buffer: &mut Buffer,
+    area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    label: &str,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
+    for (rect, tab_id) in &hits.tabs {
+        let custom = snapshot
+            .tabs
+            .iter()
+            .any(|tab| &tab.tab_id == tab_id && tab.custom_label);
+        let fg = if custom {
+            palette.overlay1
+        } else {
+            palette.overlay0
+        };
+        buffer.set_style(
+            *rect,
+            Style::default()
+                .fg(fg)
+                .bg(palette.surface0)
+                .remove_modifier(Modifier::BOLD),
+        );
+    }
+    // An overflowing strip has no room left; the view's own header names it.
+    if hits.tab_scroll_right.width > 0 {
+        return;
+    }
+    let content = tab_bar_content_area(snapshot, area);
+    if hits.new_tab.width > 0 {
+        let blank = " ".repeat(usize::from(hits.new_tab.width));
+        put_text(
+            buffer,
+            hits.new_tab.x,
+            area.y,
+            hits.new_tab.width,
+            &blank,
+            Style::default().bg(palette.panel_bg),
+        );
+    }
+    let x = hits
+        .tabs
+        .last()
+        .map_or(content.x, |(rect, _)| rect.right().saturating_add(1));
+    let text = format!("  {label}  ");
+    let width = display_width(&text);
+    if x.saturating_add(width) > content.right() {
+        hits.new_tab = Rect::default();
+        return;
+    }
+    put_text(
+        buffer,
+        x,
+        area.y,
+        width,
+        &text,
+        Style::default()
+            .fg(panel_contrast_fg(palette))
+            .bg(palette.accent)
+            .add_modifier(Modifier::BOLD),
+    );
+    if hits.new_tab.width > 0 {
+        let new_x = x + width + 1;
+        if new_x.saturating_add(NEW_TAB_WIDTH) <= content.right() {
+            hits.new_tab = Rect::new(new_x, area.y, NEW_TAB_WIDTH, 1);
+            put_text(
+                buffer,
+                new_x,
+                area.y,
+                NEW_TAB_WIDTH,
+                " + ",
+                Style::default().fg(palette.overlay1).bg(palette.panel_bg),
+            );
+        } else {
+            hits.new_tab = Rect::default();
+        }
+    }
+}
+
 fn tab_bar_content_area(snapshot: &ClientShellSnapshot, area: Rect) -> Rect {
     let reserved = tab_bar_status_area(snapshot, area)
         .map(|status| status.width.saturating_add(1))

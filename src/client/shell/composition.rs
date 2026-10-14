@@ -237,6 +237,32 @@ impl ClientShellState {
                 workspace_drop_indicator_row,
             },
         );
+        let git_space_label = self.git_view.as_ref().map(|view| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == view.workspace_id)
+                .map_or_else(String::new, |workspace| workspace.label.clone())
+        });
+        if let (Some(label), true) = (git_space_label.as_deref(), layout.tab_bar.height > 0) {
+            let changes = self
+                .git_view
+                .as_ref()
+                .and_then(|view| view.status.as_ref())
+                .map_or(0, |status| status.files.len());
+            let tab_label = match changes {
+                0 => format!("± git · {label}"),
+                count => format!("± git · {label} {count}"),
+            };
+            render::render_git_tab(
+                &mut buffer,
+                layout.tab_bar,
+                snapshot,
+                &self.config,
+                &tab_label,
+                &mut self.hits,
+            );
+        }
         self.hits.panes = surface
             .panes
             .iter()
@@ -348,6 +374,25 @@ impl ClientShellState {
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
+        if let (Some(view), Some(label)) = (self.git_view.as_mut(), git_space_label.as_deref()) {
+            // The view stands in for the space's panes: nothing below it is clickable,
+            // selectable or showing through, images included.
+            view.prepare_frame(layout.pane_surface);
+            let mut composed = frame.to_ratatui_buffer()?;
+            let rendered = git_view_render::render_git_view(
+                &mut composed,
+                layout.pane_surface,
+                view,
+                label,
+                &self.config.palette,
+            );
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, rendered.cursor);
+            self.hits.git_view = rendered.hits;
+            self.hits.panes.clear();
+            self.hits.pane_splits.clear();
+            occlusion.cover(layout.pane_surface);
+            restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
+        }
         let has_selection = self
             .selection
             .as_ref()

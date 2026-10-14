@@ -54,6 +54,7 @@ mod selection;
 mod server;
 mod session;
 mod sound;
+mod source_control;
 mod terminal;
 mod terminal_effects;
 mod terminal_modes;
@@ -184,6 +185,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # cycle_pane_previous = "prefix+shift+tab"
 # last_pane = ""          # optional, unset by default; bind e.g. "prefix+tab" for global back-and-forth
 # toggle_editor = ""      # optional, unset by default; bind e.g. "prefix+o" to flip an agent and its $EDITOR
+# git_view = ""           # optional, unset by default; bind e.g. "prefix+i" to show the space's changes and history
 # split_vertical = "prefix+v"
 # split_horizontal = "prefix+minus"
 # close_pane = "prefix+x"

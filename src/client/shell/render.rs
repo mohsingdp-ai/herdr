@@ -11,6 +11,7 @@ pub(super) use super::agent_sidebar::{ordered_agent_pane_ids, render_agent_panel
 pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;
 pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
 pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
+pub(in crate::client::shell) use tabs::render_git_tab;
 pub(super) use tabs::{render_tab_bar, tab_bar_status_width};
 
 pub(in crate::client::shell) fn render_sidebar_background(
@@ -330,6 +331,7 @@ pub(super) fn render_shell(
         hits.agent_sort_toggle = Rect::default();
         hits.space_view_toggle = Rect::default();
         hits.space_agent_toggles.clear();
+        hits.space_git_badges.clear();
         hits.new_workspace = Rect::default();
         hits.machines.clear();
         hits.workspaces.clear();

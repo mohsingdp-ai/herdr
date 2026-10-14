@@ -36,6 +36,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
             custom_label: false,
             branch: Some("main".into()),
             git_ahead_behind: None,
+            git_changes: None,
             tokens: Vec::new(),
             worktree: None,
             focused: true,
@@ -252,6 +253,7 @@ mod close_tab;
 mod copy;
 mod endpoint_requests;
 mod endpoints;
+mod git_view;
 mod graphics;
 mod input_conformance;
 #[path = "input.rs"]

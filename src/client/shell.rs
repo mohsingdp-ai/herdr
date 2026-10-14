@@ -18,6 +18,8 @@ mod endpoint_sidebar;
 mod endpoints;
 pub(super) use endpoints::*;
 mod checkpoint_picker;
+mod git_view;
+mod git_view_render;
 mod global_menu;
 mod graphics;
 mod input;

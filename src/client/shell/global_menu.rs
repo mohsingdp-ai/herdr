@@ -47,6 +47,10 @@ pub(super) fn global_menu_items(
         ));
     }
     items.push((
+        "git",
+        ClientGlobalMenuAction::Binding(crate::input::KeybindAction::GitView),
+    ));
+    items.push((
         "detach",
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
     ));

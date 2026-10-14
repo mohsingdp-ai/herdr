@@ -108,6 +108,7 @@ fn grouped_worktrees_render_parent_branch_and_indented_child() {
         custom_label: false,
         branch: Some("worktree/feature".into()),
         git_ahead_behind: None,
+        git_changes: None,
         tokens: Vec::new(),
         worktree: Some(ClientShellWorktree {
             key: "repo".into(),

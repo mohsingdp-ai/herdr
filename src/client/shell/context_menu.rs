@@ -19,6 +19,7 @@ impl ClientContextMenuOverlay {
                 item("New worktree", Action::NewWorktree),
                 item("Open worktree...", Action::OpenWorktree),
                 item("Rewind…", Action::Rewind),
+                item("Git…", Action::Git),
             ],
             ClientContextMenuTarget::Workspace {
                 is_linked_worktree: true,
@@ -27,6 +28,7 @@ impl ClientContextMenuOverlay {
                 item("Rename", Action::Rename),
                 item("Close", Action::Close),
                 item("Rewind…", Action::Rewind),
+                item("Git…", Action::Git),
                 item("Delete worktree checkout...", Action::RemoveWorktree),
             ],
             ClientContextMenuTarget::Workspace {
@@ -43,6 +45,7 @@ impl ClientContextMenuOverlay {
                 item("New worktree", Action::NewWorktree),
                 item("Open worktree...", Action::OpenWorktree),
                 item("Rewind…", Action::Rewind),
+                item("Git…", Action::Git),
                 item(
                     if *collapsed { "Expand" } else { "Collapse" },
                     Action::ToggleGroup,
@@ -280,6 +283,7 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                 }
             }
+            ClientContextMenuAction::Git => self.open_git_view(Some(workspace_id), outcome),
             ClientContextMenuAction::Rewind => {
                 if let Some(pane_id) = self.workspace_folder_pane(&workspace_id) {
                     self.open_checkpoint_picker(pane_id, outcome);

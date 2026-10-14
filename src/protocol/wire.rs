@@ -1027,6 +1027,9 @@ pub struct ClientShellWorkspace {
     pub custom_label: bool,
     pub branch: Option<String>,
     pub git_ahead_behind: Option<(usize, usize)>,
+    /// Files with uncommitted changes. Optional: older servers never send it.
+    #[serde(default)]
+    pub git_changes: Option<usize>,
     pub tokens: Vec<(String, String)>,
     pub worktree: Option<ClientShellWorktree>,
     pub focused: bool,
@@ -2826,6 +2829,7 @@ mod tests {
                 custom_label: false,
                 branch: Some("main".into()),
                 git_ahead_behind: None,
+                git_changes: None,
                 tokens: Vec::new(),
                 worktree: None,
                 focused: true,

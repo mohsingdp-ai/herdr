@@ -103,7 +103,9 @@ pub(super) fn sync_client_shell_keyboard_report_all(
     let Some(shell) = state.shell.as_ref() else {
         return Ok(());
     };
-    let desired = state.pane_keyboard_report_all || shell.host_keyboard_report_all_requested();
+    // A pane hidden behind the git view gets no keys, so its keyboard mode is moot.
+    let desired = (state.pane_keyboard_report_all && shell.focused_pane_receives_keys())
+        || shell.host_keyboard_report_all_requested();
     if desired == state.keyboard_report_all_active {
         return Ok(());
     }

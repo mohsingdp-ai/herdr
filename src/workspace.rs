@@ -47,6 +47,8 @@ pub struct WorkspaceGitStatus {
     pub auto_label: String,
     pub branch: Option<String>,
     pub ahead_behind: Option<(usize, usize)>,
+    /// Files with uncommitted changes, untracked ones included.
+    pub changes: Option<usize>,
     pub space: Option<GitSpaceMetadata>,
 }
 
@@ -96,6 +98,7 @@ impl WorkspaceGitStatusSnapshot {
             auto_label,
             branch: self.branch,
             ahead_behind: self.ahead_behind,
+            changes: None,
             space: self.space,
         }
     }
@@ -190,6 +193,7 @@ pub struct Workspace {
     pub(crate) cached_git_branch: Option<String>,
     /// Cached ahead/behind counts for the workspace repo's current branch upstream.
     pub(crate) cached_git_ahead_behind: Option<(usize, usize)>,
+    pub(crate) cached_git_changes: Option<usize>,
     /// Cached derived Git repo metadata for worktree actions and status display.
     pub(crate) cached_git_space: Option<GitSpaceMetadata>,
     /// Explicit Herdr-managed worktree grouping provenance.
@@ -258,6 +262,7 @@ impl Workspace {
             cached_git_status_key,
             cached_git_branch: git_branch(&identity_cwd),
             cached_git_ahead_behind: None,
+            cached_git_changes: None,
             cached_git_space,
             worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
@@ -410,6 +415,7 @@ impl Workspace {
                 cached_git_status_key,
                 cached_git_branch: git_branch(&initial_cwd),
                 cached_git_ahead_behind: None,
+                cached_git_changes: None,
                 cached_git_space,
                 worktree_space: None,
                 metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
@@ -1076,6 +1082,10 @@ impl Workspace {
         self.cached_git_ahead_behind
     }
 
+    pub fn git_changes(&self) -> Option<usize> {
+        self.cached_git_changes
+    }
+
     pub fn git_space(&self) -> Option<&GitSpaceMetadata> {
         self.cached_git_space.as_ref()
     }
@@ -1199,6 +1209,7 @@ impl Workspace {
             cached_git_status_key: identity_cwd.clone(),
             cached_git_branch: git_branch(&identity_cwd),
             cached_git_ahead_behind: None,
+            cached_git_changes: None,
             cached_git_space: None,
             worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),

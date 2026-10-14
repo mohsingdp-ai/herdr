@@ -1777,6 +1777,9 @@ impl ClientShellState {
             }
             return;
         }
+        if self.git_view.is_some() && self.route_git_view_mouse(mouse, outcome) {
+            return;
+        }
 
         if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
             let selection_hit = self.active_selection_pane();
@@ -2173,6 +2176,16 @@ impl ClientShellState {
                     self.toggle_collapsed_group(&endpoint_id, key);
                     outcome.repaint = true;
                     self.persist_chrome_preferences(outcome);
+                    return;
+                }
+                let git_badge = self
+                    .hits
+                    .space_git_badges
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, workspace_id)| workspace_id.clone());
+                if let Some(workspace_id) = git_badge {
+                    self.open_git_view(Some(workspace_id), outcome);
                     return;
                 }
                 let workspace_press = self

@@ -170,8 +170,19 @@ impl ChildExitReason {
 
 #[cfg(unix)]
 pub(crate) use unix_common::{
-    classify_child_exit, poll_fd_readable, project_editor_argv, read_fd, shared_ssh_control_path,
+    classify_child_exit, isolate_process_tree, poll_fd_readable, project_editor_argv, read_fd,
+    shared_ssh_control_path, stop_process_tree,
 };
+
+/// Without process groups only the command itself can be stopped.
+#[cfg(not(unix))]
+pub(crate) fn isolate_process_tree(_command: &mut std::process::Command) {}
+
+#[cfg(not(unix))]
+pub(crate) fn stop_process_tree(child: &mut std::process::Child, _grace: std::time::Duration) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
 
 #[cfg(not(any(unix, windows)))]
 pub(crate) fn classify_child_exit(_status: &portable_pty::ExitStatus) -> ChildExitReason {

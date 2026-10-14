@@ -62,6 +62,10 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if action == crate::input::KeybindAction::GitView {
+                    self.toggle_git_view(outcome);
+                    return;
+                }
                 if action == crate::input::KeybindAction::OpenNotificationTarget {
                     self.focus_visible_notification(outcome);
                     return;
@@ -517,6 +521,14 @@ impl ClientShellState {
         }
         if let PendingEndpointKind::PaneLinkResolve { target } = pending.kind {
             return self.complete_link_hover(target, result);
+        }
+        if let PendingEndpointKind::Git {
+            generation,
+            request,
+        } = pending.kind
+        {
+            // The view shows its own errors; a notice appears only once it has closed.
+            return self.handle_git_view_result(generation, request, result);
         }
         if result.is_ok() {
             let timeout_key = ClientEndpointNoticeKey {

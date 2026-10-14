@@ -524,6 +524,7 @@ pub(crate) fn render_sidebar(
                     },
                     palette.red,
                 ),
+                (git_changes_badge(workspace), palette.yellow),
             ]
         });
         let segments_width = |segments: &[(String, ratatui::style::Color)]| {
@@ -578,14 +579,21 @@ pub(crate) fn render_sidebar(
         let name_rect = right_segments.as_ref().map_or(rect, |segments| {
             let x = right.saturating_sub(segments_width(segments)).max(rect.x);
             segments.iter().fold(x, |cursor, (text, color)| {
-                put_segment(
+                let end = put_segment(
                     buffer,
                     cursor,
                     rect.y,
                     right,
                     text,
                     Style::default().fg(*color),
-                )
+                );
+                if text.starts_with(GIT_CHANGES_PREFIX) && end > cursor && config.mouse_capture {
+                    hits.space_git_badges.push((
+                        Rect::new(cursor, rect.y, end - cursor, 1),
+                        workspace.workspace_id.clone(),
+                    ));
+                }
+                end
             });
             // render_workspace_rows stops 2 columns short of its area: 1 column gap.
             Rect::new(rect.x, rect.y, (x + 1).saturating_sub(rect.x), rect.height)
@@ -734,7 +742,7 @@ pub(crate) fn render_sidebar(
                     );
                 }
                 if behind > 0 {
-                    put_segment(
+                    x = put_segment(
                         buffer,
                         x,
                         agent_y,
@@ -742,6 +750,23 @@ pub(crate) fn render_sidebar(
                         &format!(" ↓{behind}"),
                         Style::default().fg(palette.red),
                     );
+                }
+                let badge = git_changes_badge(workspace);
+                if !badge.is_empty() {
+                    let end = put_segment(
+                        buffer,
+                        x,
+                        agent_y,
+                        line_end,
+                        &badge,
+                        Style::default().fg(palette.yellow),
+                    );
+                    if end > x && config.mouse_capture {
+                        hits.space_git_badges.push((
+                            Rect::new(x, agent_y, end - x, 1),
+                            workspace.workspace_id.clone(),
+                        ));
+                    }
                 }
             }
             agent_y = agent_y.saturating_add(1);
@@ -1213,5 +1238,15 @@ pub(in crate::client::shell) fn render_workspace_rows(
                 buffer[(x, y)].set_bg(background);
             }
         }
+    }
+}
+
+const GIT_CHANGES_PREFIX: &str = " ±";
+
+/// " ±N" for a space with N uncommitted files; empty when clean or unknown.
+fn git_changes_badge(workspace: &ClientShellWorkspace) -> String {
+    match workspace.git_changes {
+        Some(count) if count > 0 => format!("{GIT_CHANGES_PREFIX}{count}"),
+        _ => String::new(),
     }
 }

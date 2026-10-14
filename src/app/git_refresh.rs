@@ -267,13 +267,19 @@ fn refresh_workspace_git_statuses_with_cache_and_demand(
         if let Some(cache_entry) = cache_entry {
             cache_updates.push((job.cache_key.clone(), cache_entry));
         }
+        // Shown beside ahead/behind, so it shares that demand.
+        let changes = (demand.ahead_behind && snapshot.space.is_some())
+            .then(|| crate::source_control::recent_changed_file_count(&job.cache_key))
+            .flatten();
         results.extend(job.targets.into_iter().map(move |target| {
-            snapshot.clone().into_workspace_status(
+            let mut status = snapshot.clone().into_workspace_status(
                 target.workspace_id,
                 target.resolved_identity_cwd,
                 job.cache_key.clone(),
                 demand,
-            )
+            );
+            status.changes = changes;
+            status
         }));
     }
 

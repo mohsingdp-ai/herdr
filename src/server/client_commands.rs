@@ -274,6 +274,50 @@ mod tests {
             actual.remove("checkpoint.restore").as_deref(),
             Some("1caf00149e2931c8fdf516856367377d18aa11f8ac62d2013b920f3201fd9c7e")
         );
+        assert_eq!(
+            actual.remove("git.status").as_deref(),
+            Some("68cc5fd4638d36c31db6b58a817da88479b4f9d37fc734d836247acadc850d99")
+        );
+        assert_eq!(
+            actual.remove("git.diff").as_deref(),
+            Some("a362c5e8134e29e7b47600b769f8f8731a6febf736c0bfdf7451075e5a7ef5de")
+        );
+        assert_eq!(
+            actual.remove("git.log").as_deref(),
+            Some("c36ad9c098ce6aaac22a57b8ea18c155f4d528f67bce590cc16a6cf9e0ac043d")
+        );
+        assert_eq!(
+            actual.remove("git.show").as_deref(),
+            Some("191b135073e3fc2bbf1416462234ad5fc18053ed885818d157c4642359cf54d4")
+        );
+        assert_eq!(
+            actual.remove("git.stage").as_deref(),
+            Some("ae08bc831d5d2db4aeda168e2e23b3eb346e594d1f37208d1d29b918002c0ec4")
+        );
+        assert_eq!(
+            actual.remove("git.unstage").as_deref(),
+            Some("44b4b47aaa0d6e94bd556327410281e98d32592edef11591e40f53951e157920")
+        );
+        assert_eq!(
+            actual.remove("git.discard").as_deref(),
+            Some("9b23388b92a726b0249c718f1b3317d6e195736a7e417183e95d3b83032eef85")
+        );
+        assert_eq!(
+            actual.remove("git.commit").as_deref(),
+            Some("a391c963fdcb0cdfe96e8f2f841f603224f3daaadd2f879ef15eef339dc281ee")
+        );
+        assert_eq!(
+            actual.remove("git.uncommit").as_deref(),
+            Some("4118fe59c4e5fb84531a19ded2b7b1e7c679313fda10e7b219d263305b2546ce")
+        );
+        assert_eq!(
+            actual.remove("git.push").as_deref(),
+            Some("145ac64d46f8df77348386faf9439a6e81954601782b3e7fc0de1e124decbb56")
+        );
+        assert_eq!(
+            actual.remove("git.pull").as_deref(),
+            Some("49f43a2b00ea01074023471d2ef30e08141a77545f9ed56c2e1f706f6b232405")
+        );
 
         assert_eq!(
             actual, expected,

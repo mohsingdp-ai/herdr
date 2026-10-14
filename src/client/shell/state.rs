@@ -104,6 +104,9 @@ pub(super) struct ShellHitMap {
     pub(super) space_view_toggle: Rect,
     /// Nested sidebar: show/hide chevrons for each space's agents.
     pub(super) space_agent_toggles: Vec<(Rect, String)>,
+    /// Nested sidebar: a space's "±N" uncommitted-changes badge, which opens its git view.
+    pub(super) space_git_badges: Vec<(Rect, String)>,
+    pub(super) git_view: super::git_view::GitViewHits,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,
@@ -537,6 +540,7 @@ pub(super) enum ClientContextMenuAction {
     CopyPaneId,
     ClosePane,
     Rewind,
+    Git,
 }
 
 #[derive(Debug)]
@@ -662,6 +666,10 @@ pub(super) enum PendingEndpointKind {
     SpacePickerReopen,
     CheckpointList,
     CheckpointRestore,
+    Git {
+        generation: u64,
+        request: super::git_view::GitRequest,
+    },
     SelectionCopy,
     PaneScroll {
         pane_id: String,
@@ -782,6 +790,7 @@ pub(super) enum ClientInputTarget {
 pub(super) struct ClientInputContext {
     pub(super) mode: ClientShellMode,
     pub(super) overlay: Option<ClientShellOverlayKind>,
+    pub(super) git_view: bool,
     pub(super) popup_terminal_id: Option<String>,
     pub(super) popup_pending: bool,
     pub(super) retained_selection: bool,
@@ -929,6 +938,9 @@ pub(crate) struct ClientShellState {
     pub(super) pending_workspace_highlight: Option<PendingWorkspaceHighlight>,
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
+    /// The git view, shown in place of the focused space's panes.
+    pub(super) git_view: Option<super::git_view::ClientGitView>,
+    pub(super) git_view_generation: u64,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
     pub(super) link_hover: Option<super::link_hover::LinkHover>,
@@ -1106,6 +1118,8 @@ impl ClientShellState {
             pending_workspace_highlight: None,
             reveal_navigation_workspace: false,
             overlay,
+            git_view: None,
+            git_view_generation: 0,
             previous_pane_id: None,
             pane_mouse_gesture: None,
             link_hover: None,
@@ -1616,6 +1630,7 @@ impl ClientShellState {
         }
         self.snapshot = Some(snapshot);
         self.reconcile_pending_workspace_highlight();
+        self.retarget_git_view();
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
             let matching = self.snapshot.as_ref().is_some_and(|snapshot| {
