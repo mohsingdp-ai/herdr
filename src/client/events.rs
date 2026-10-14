@@ -10,6 +10,8 @@ pub(super) enum ClientLoopEvent {
     DirectGraphicsResponse(direct_graphics::Response),
     #[cfg(windows)]
     StdinEvents(Vec<crate::protocol::ClientInputEvent>),
+    #[cfg(windows)]
+    NotificationActivated(shell::ClientSystemNotificationTarget),
     Resize(u16, u16, u32, u32, bool),
     TerminalUnavailable(io::Error),
     ServerMessage {
@@ -32,7 +34,9 @@ pub(super) enum ClientLoopEvent {
     },
     /// The desktop folder picker answered.
     FolderPicked(crate::platform::FolderPick),
-    /// A desktop notification for this pane was clicked.
+    /// A desktop notification for this pane was clicked (Windows uses
+    /// `NotificationActivated`).
+    #[cfg(not(windows))]
     NotificationClicked {
         endpoint_id: endpoint::ClientEndpointId,
         pane_id: String,

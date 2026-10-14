@@ -17,6 +17,12 @@
       "title": "Server",
       "keys": [
         {
+          "key": "server.allow_unelevated_clients",
+          "type": "boolean",
+          "default": "false",
+          "description": "Windows only: allow ordinary clients from the same account to control an elevated server and its administrator panes. Applies at server startup and requires a restart; config reload does not change access. The --allow-unelevated-clients startup flag enables sharing even when this setting is false."
+        },
+        {
           "key": "server.headless_cols",
           "type": "integer",
           "default": "120",
@@ -776,6 +782,12 @@
           "description": "Focus the last focused pane across workspaces and tabs. Unset by default."
         },
         {
+          "key": "keys.toggle_editor",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Flip between the focused agent and its $EDITOR pane, opened in the agent's folder and zoomed in the agent's tab. Unset by default."
+        },
+        {
           "key": "keys.split_vertical",
           "type": "keybinding",
           "default": "\"prefix+v\"",
@@ -1053,6 +1065,12 @@
             "dots",
             "symbols"
           ]
+        },
+        {
+          "key": "ui.sidebar.agents.nested",
+          "type": "boolean",
+          "default": "false",
+          "description": "With agent_panel_sort = \"spaces\", list each agent under its space in the spaces list instead of a separate agent panel. The sidebar header switches between the compact list and the expanded tree."
         },
         {
           "key": "ui.sidebar.agents.row_gap",

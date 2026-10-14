@@ -133,7 +133,9 @@ impl App {
         folder: Option<PathBuf>,
         argv: &[String],
     ) -> std::io::Result<PaneId> {
-        let (rows, cols) = self.state.estimate_pane_size();
+        let (rows, cols) = self
+            .state
+            .new_pane_size(crate::ui::NewPanePlacement::ZoomedOverlay);
         let scrollback_limit_bytes = self.state.pane_scrollback_limit_bytes;
         let host_terminal_theme = self.state.host_terminal_theme;
         let host_terminal_appearance = self.state.host_terminal_appearance;

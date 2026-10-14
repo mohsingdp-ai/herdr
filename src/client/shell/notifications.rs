@@ -330,6 +330,7 @@ mod tests {
         assert!(state.visible_notification.is_none());
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn clicking_a_system_notification_selects_its_pane() {
         let mut config = ClientShellConfig::from_config(&Config::default());

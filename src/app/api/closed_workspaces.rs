@@ -106,7 +106,7 @@ impl App {
             workspace,
         } = closed;
         let mut snapshot = crate::persist::single_workspace_session(workspace);
-        let (rows, cols) = self.state.estimate_pane_size();
+        let (rows, cols) = self.state.new_pane_size(crate::ui::NewPanePlacement::Alone);
         let (mut workspaces, terminals, runtimes) = crate::persist::restore(
             &snapshot,
             None,
