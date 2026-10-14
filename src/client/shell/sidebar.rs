@@ -306,12 +306,13 @@ pub(crate) fn render_sidebar(
                 !worktree.is_linked_worktree && state.collapsed_groups.contains(&worktree.key)
             })
     };
-    // A folded space hides its agents.
-    let space_agents = |workspace: &ClientShellWorkspace| {
+    // A folded space hides its agents; worktrees under a project have no ⌃ of
+    // their own, so theirs always show.
+    let space_agents = |workspace: &ClientShellWorkspace, indented: bool| {
         agents
             .iter()
             .filter(|agent| agent.workspace_id == workspace.workspace_id)
-            .filter(|_| !state.collapsed_groups.contains(&agents_key(workspace)))
+            .filter(|_| indented || !state.collapsed_groups.contains(&agents_key(workspace)))
             .filter(|_| !tree_group_folded(workspace))
             .filter(|_| inline_agent(workspace).is_none())
             .collect::<Vec<_>>()
@@ -362,7 +363,7 @@ pub(crate) fn render_sidebar(
                         .len()
                         .max(1)
                         .min(u16::MAX as usize) as u16;
-                    space_agents(workspace)
+                    space_agents(workspace, entry.indented)
                         .into_iter()
                         .fold(space, |height, agent| {
                             height.saturating_add(agent_height(agent))
@@ -453,33 +454,36 @@ pub(crate) fn render_sidebar(
         let mut right = rect
             .right()
             .saturating_sub(if show_group_toggle { 2 } else { 1 });
-        let agents_toggle =
-            (nested && rect.height > 0 && (has_agents(workspace) || tree_group_key.is_some()))
-                .then(|| {
-                    let key = tree_group_key.unwrap_or_else(|| agents_key(workspace));
-                    let toggle = Rect::new(right.saturating_sub(1).max(rect.x), rect.y, 1, 1);
-                    put_text(
-                        buffer,
-                        toggle.x,
-                        toggle.y,
-                        1,
-                        if state.collapsed_groups.contains(&key) {
-                            "⌄"
-                        } else {
-                            "⌃"
-                        },
-                        // Same colour as the space name.
-                        if workspace.focused || dragged {
-                            Style::default()
-                                .fg(palette.text)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default().fg(palette.subtext0)
-                        },
-                    );
-                    right = toggle.x.saturating_sub(1).max(rect.x);
-                    (toggle, key)
-                });
+        // Only project rows fold; worktrees under them have no ⌃.
+        let agents_toggle = (nested
+            && rect.height > 0
+            && !entry.indented
+            && (has_agents(workspace) || tree_group_key.is_some()))
+        .then(|| {
+            let key = tree_group_key.unwrap_or_else(|| agents_key(workspace));
+            let toggle = Rect::new(right.saturating_sub(1).max(rect.x), rect.y, 1, 1);
+            put_text(
+                buffer,
+                toggle.x,
+                toggle.y,
+                1,
+                if state.collapsed_groups.contains(&key) {
+                    "⌄"
+                } else {
+                    "⌃"
+                },
+                // Same colour as the space name.
+                if workspace.focused || dragged {
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(palette.subtext0)
+                },
+            );
+            right = toggle.x.saturating_sub(1).max(rect.x);
+            (toggle, key)
+        });
         let has_tree_children = branch_line(entry_position);
         let branch = workspace
             .branch
@@ -656,7 +660,7 @@ pub(crate) fn render_sidebar(
         // worktree's dot); agents sit after it.
         let guide = if nested && entry.indented { 6 } else { 1 };
         let indent = guide + 1;
-        for agent in space_agents(workspace) {
+        for agent in space_agents(workspace, entry.indented) {
             let height = agent_height(agent);
             if agent_y.saturating_add(height) > body.bottom() {
                 break;

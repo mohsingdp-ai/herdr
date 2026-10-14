@@ -2188,6 +2188,8 @@ fn tree_view_hangs_worktrees_off_the_branch_line_with_icon_only_status() {
     assert!(lines[parent + 2].starts_with("   main"), "{lines:#?}");
     // Worktrees hang off it; the trunk runs past one with siblings below.
     assert!(lines[parent + 3].starts_with("   ├─ ● v4"), "{lines:#?}");
+    // Only the project row folds; its worktrees have no ⌃ of their own.
+    assert!(!lines[parent + 3].contains('⌃'), "{lines:#?}");
     assert!(
         lines[parent + 4].starts_with("   │  │ bravo · ●"),
         "{lines:#?}"
