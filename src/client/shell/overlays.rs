@@ -235,8 +235,13 @@ fn panel(
     if a.width < 2 || a.height < 2 {
         return None;
     }
-    let background = Style::default().bg(bg).remove_modifier(Modifier::DIM);
-    let border = Style::default().fg(c).bg(bg).remove_modifier(Modifier::DIM);
+    // Clear every text modifier, so bold or italic text under the popup
+    // does not show through its contents.
+    let background = Style::default().bg(bg).remove_modifier(Modifier::all());
+    let border = Style::default()
+        .fg(c)
+        .bg(bg)
+        .remove_modifier(Modifier::all());
     for y in a.y..a.bottom() {
         for x in a.x..a.right() {
             b[(x, y)].set_symbol(" ").set_style(background);

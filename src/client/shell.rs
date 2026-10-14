@@ -38,7 +38,9 @@ mod surface_patch;
 mod text_editor;
 mod word_selection;
 mod worktrees;
-use checkpoint_picker::ClientCheckpointPickerOverlay;
+use checkpoint_picker::{
+    ClientCheckpointPickerOverlay, ClientCheckpointRow, CHECKPOINT_TOGGLE_HIT,
+};
 use space_picker::{ClientSpacePickerOverlay, ClientSpacePickerRow};
 use text_editor::TextEditor;
 use word_selection::ClientWordSelection;

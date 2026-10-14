@@ -16,6 +16,53 @@ pub(super) struct ClientCheckpointPickerOverlay {
     pub(super) restoring: bool,
     /// The server predates checkpoints.
     pub(super) unsupported: bool,
+    /// List every prompt, not only those that changed files.
+    pub(super) show_all: bool,
+}
+
+/// A picker row, pointing into `entries`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ClientCheckpointRow {
+    /// The snapshot saved just before the last rewind: choosing it undoes that rewind.
+    UndoRewind(usize),
+    Checkpoint(usize),
+}
+
+/// Position of the "changes | all prompts" toggle among the picker's click targets.
+pub(super) const CHECKPOINT_TOGGLE_HIT: usize = usize::MAX;
+
+impl ClientCheckpointPickerOverlay {
+    pub(super) fn is_undo(entry: &crate::api::schema::CheckpointInfo) -> bool {
+        entry.agent.is_none() && entry.label.starts_with("before rewind")
+    }
+
+    /// The last rewind while nothing has run since, then the prompts: only
+    /// those that changed files unless `show_all`.
+    pub(super) fn rows(&self) -> Vec<ClientCheckpointRow> {
+        let undo = self
+            .entries
+            .first()
+            .filter(|entry| Self::is_undo(entry))
+            .map(|_| ClientCheckpointRow::UndoRewind(0));
+        undo.into_iter()
+            .chain(
+                self.entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| !Self::is_undo(entry))
+                    .filter(|(_, entry)| self.show_all || !entry.changed_files.is_empty())
+                    .map(|(index, _)| ClientCheckpointRow::Checkpoint(index)),
+            )
+            .collect()
+    }
+
+    pub(super) fn entry_index(row: ClientCheckpointRow) -> usize {
+        match row {
+            ClientCheckpointRow::UndoRewind(index) | ClientCheckpointRow::Checkpoint(index) => {
+                index
+            }
+        }
+    }
 }
 
 impl ClientShellState {
@@ -69,6 +116,7 @@ impl ClientShellState {
             KeyCode::Down | KeyCode::Char('j') => self.move_checkpoint_picker_selection(1),
             KeyCode::Char('p') if control => self.move_checkpoint_picker_selection(-1),
             KeyCode::Char('n') if control => self.move_checkpoint_picker_selection(1),
+            KeyCode::Char('a') if !control => self.toggle_checkpoint_picker_all(),
             _ => {}
         }
         true
@@ -78,8 +126,15 @@ impl ClientShellState {
         let Some(ClientShellOverlay::CheckpointPicker(picker)) = self.overlay.as_mut() else {
             return;
         };
-        let last = picker.entries.len().saturating_sub(1) as isize;
+        let last = picker.rows().len().saturating_sub(1) as isize;
         picker.selected = (picker.selected as isize + delta).clamp(0, last) as usize;
+    }
+
+    fn toggle_checkpoint_picker_all(&mut self) {
+        if let Some(ClientShellOverlay::CheckpointPicker(picker)) = self.overlay.as_mut() {
+            picker.show_all = !picker.show_all;
+            picker.selected = 0;
+        }
     }
 
     /// Rewinds to `position` (a click) or the highlighted checkpoint (Enter).
@@ -91,13 +146,23 @@ impl ClientShellState {
         let Some(ClientShellOverlay::CheckpointPicker(picker)) = self.overlay.as_mut() else {
             return;
         };
+        if position == Some(CHECKPOINT_TOGGLE_HIT) {
+            self.toggle_checkpoint_picker_all();
+            outcome.repaint = true;
+            return;
+        }
         if picker.restoring || picker.loading {
             return;
         }
         let position = position.unwrap_or(picker.selected);
         let Some(checkpoint_id) = picker
-            .entries
+            .rows()
             .get(position)
+            .and_then(|row| {
+                picker
+                    .entries
+                    .get(ClientCheckpointPickerOverlay::entry_index(*row))
+            })
             .map(|entry| entry.checkpoint_id.clone())
         else {
             return;
@@ -152,7 +217,7 @@ impl ClientShellState {
                 // Stay open on the refreshed list, whose newest entry undoes this.
                 picker.restoring = false;
                 picker.loading = true;
-                picker.notice = Some("rewound · the top entry undoes it".to_owned());
+                picker.notice = Some("went back · ↶ undo last rewind reverses it".to_owned());
                 let pane_id = picker.pane_id.clone();
                 let mut outcome = ClientShellInput::default();
                 self.request_checkpoint_list(pane_id, &mut outcome);

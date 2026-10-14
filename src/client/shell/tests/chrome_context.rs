@@ -738,17 +738,24 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
     );
     let text = screen_text(&mut state);
     for expected in [
-        "rewind · herdr",
+        "rewind files · herdr",
         "before codex",
         "before claude",
-        "↵ rewind",
+        "↵ go back",
         "claude · 2 files",
-        "changed: a.rs, b.rs",
-        "\"what is this\"",
-        "claude · no changes",
+        // Enter's effect, spelled out for the highlighted prompt.
+        "puts your files back to",
+        "undoes 1 prompt · restores a.rs, b.rs",
     ] {
         assert!(text.contains(expected), "missing {expected}:\n{text}");
     }
+    // Prompts without changes only show with "all prompts" (a).
+    assert!(!text.contains("what is this"), "{text}");
+    state.handle_input_bytes(b"a");
+    let text = screen_text(&mut state);
+    assert!(text.contains("\"what is this\""), "{text}");
+    assert!(text.contains("claude · no changes"), "{text}");
+    state.handle_input_bytes(b"a");
 
     // Down + Enter rewinds to the older checkpoint.
     state.handle_input_bytes(b"\x1b[B");
@@ -777,7 +784,7 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
         &request.method,
         crate::api::schema::Method::CheckpointList(_)
     ));
-    assert!(screen_text(&mut state).contains("the top entry undoes it"));
+    assert!(screen_text(&mut state).contains("undo last rewind reverses it"));
 
     // A refusal (an agent still working) shows its reason.
     state.handle_endpoint_result(
@@ -786,15 +793,26 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
         Ok(crate::api::schema::ResponseResult::CheckpointList {
             folder: "/work/herdr".into(),
             checkpoints: vec![
-                checkpoint("3", "before rewind"),
+                crate::api::schema::CheckpointInfo {
+                    agent: None,
+                    ..checkpoint("3", "before rewind to \"before claude\"")
+                },
                 checkpoint("1", "before claude"),
             ],
         }),
     );
+    // The last rewind sits on top as a green undo row.
+    let text = screen_text(&mut state);
+    assert!(text.contains("↶ undo last rewind"), "{text}");
+    assert!(text.contains("undoes your last rewind"), "{text}");
     let retry = state.handle_input_bytes(b"\r");
     let [ClientShellAction::Endpoint { request, .. }] = &retry.actions[..] else {
         panic!("Enter should rewind");
     };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::CheckpointRestore(params) if params.checkpoint_id == "3"
+    ));
     state.handle_endpoint_result(
         "boot-1",
         &request.id,
