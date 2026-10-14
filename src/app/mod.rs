@@ -157,6 +157,8 @@ pub struct App {
     /// Parsed `ui.window_title` plus the hostname resolved when it was applied.
     window_title_template: Option<(crate::config::WindowTitleTemplate, String)>,
     pub(crate) persist_pane_history: bool,
+    /// `experimental.checkpoints`: snapshot an agent's folder before each prompt.
+    pub(crate) checkpoints_enabled: bool,
     /// Last render-loop attempt, including a throttled hidden-only PTY skip.
     pub(crate) last_render_at: Option<Instant>,
     /// Last attempt that could update a connected presentation surface.
@@ -677,6 +679,7 @@ impl App {
             next_tab_bar_datetime_refresh: None,
             window_title_template: None,
             persist_pane_history: config.experimental.pane_history,
+            checkpoints_enabled: config.experimental.checkpoints,
             last_render_at: None,
             last_presentation_at: None,
             api_rx,
@@ -961,6 +964,7 @@ impl App {
             self.state.cjk_ime_cursor_shape =
                 config.experimental.cjk_ime_cursor_shape.to_decscusr();
             self.persist_pane_history = config.experimental.pane_history;
+            self.checkpoints_enabled = config.experimental.checkpoints;
             if !self.persist_pane_history {
                 crate::persist::clear_history();
             }

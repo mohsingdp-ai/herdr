@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 mod agent_view;
 mod agents;
+mod checkpoints;
 mod closed_workspaces;
 mod editor;
 mod env;
@@ -719,6 +720,13 @@ impl App {
             .and_then(|ws| ws.pane_state(update.pane_id))
             .map(|pane| pane_agent_status(update.state, pane.seen))
             .unwrap_or_else(|| pane_agent_status(update.state, update.seen));
+        self.checkpoint_before_prompt(
+            update.ws_idx,
+            update.pane_id,
+            previous_agent_status,
+            agent_status,
+            update.agent_label.as_deref(),
+        );
 
         if previous_agent_status != agent_status
             || update.previous_presentation != update.presentation
@@ -1087,6 +1095,13 @@ impl App {
             Method::WorkspaceClosedList(_) => return self.handle_workspace_closed_list(request.id),
             Method::WorkspaceReopen(params) => {
                 return self.handle_workspace_reopen(request.id, params);
+            }
+            Method::CheckpointList(_) | Method::CheckpointRestore(_) => {
+                return responses::encode_error(
+                    request.id,
+                    "invalid_request",
+                    "checkpoints are handled asynchronously by the app runtime",
+                );
             }
             Method::WorktreeList(_) | Method::WorktreeOpen(_) => {
                 return responses::encode_error(

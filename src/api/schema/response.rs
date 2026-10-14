@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::agents::AgentInfo;
+use super::checkpoints::CheckpointInfo;
 use super::common::{ClientWindowTitleReason, NotificationShowReason};
 use super::events::EventEnvelope;
 use super::integrations::{
@@ -64,6 +65,16 @@ pub enum ResponseResult {
     },
     ClosedWorkspaceList {
         workspaces: Vec<ClosedWorkspaceInfo>,
+    },
+    CheckpointList {
+        /// The folder the checkpoints belong to.
+        folder: String,
+        checkpoints: Vec<CheckpointInfo>,
+    },
+    CheckpointRestored {
+        checkpoint_id: String,
+        /// Saved just before rewinding; restore it to undo the rewind.
+        undo_checkpoint_id: String,
     },
     WorktreeList {
         source: WorktreeSourceInfo,

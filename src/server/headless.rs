@@ -3043,6 +3043,15 @@ impl HeadlessServer {
         }
         if matches!(
             &msg.request.method,
+            api::schema::Method::CheckpointList(_) | api::schema::Method::CheckpointRestore(_)
+        ) {
+            // Git work happens off the loop; nothing on screen changes yet.
+            self.app
+                .handle_deferred_checkpoint_api_request(msg.request, msg.respond_to);
+            return changed;
+        }
+        if matches!(
+            &msg.request.method,
             api::schema::Method::WorktreeCreate(_)
                 | api::schema::Method::WorktreeRemove(_)
                 | api::schema::Method::WorktreeList(_)

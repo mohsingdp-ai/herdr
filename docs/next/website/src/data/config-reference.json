@@ -1515,6 +1515,12 @@
           "description": "Persist pane screen history to session-history.json."
         },
         {
+          "key": "experimental.checkpoints",
+          "type": "boolean",
+          "default": "false",
+          "description": "Before an agent works on a prompt, save a hidden git snapshot of its folder under refs/herdr/checkpoints/ so the folder can be rewound from the agent's or space's right-click menu."
+        },
+        {
           "key": "experimental.reveal_hidden_cursor_for_cjk_ime",
           "type": "boolean",
           "default": "false",

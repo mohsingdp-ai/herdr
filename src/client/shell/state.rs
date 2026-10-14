@@ -298,6 +298,7 @@ pub(super) enum ClientShellOverlayKind {
     GlobalMenu,
     Settings,
     SpacePicker,
+    CheckpointPicker,
 }
 
 #[derive(Debug)]
@@ -535,6 +536,7 @@ pub(super) enum ClientContextMenuAction {
     ToggleRightClickPassthrough,
     CopyPaneId,
     ClosePane,
+    Rewind,
 }
 
 #[derive(Debug)]
@@ -605,6 +607,7 @@ pub(super) enum ClientShellOverlay {
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
     SpacePicker(ClientSpacePickerOverlay),
+    CheckpointPicker(ClientCheckpointPickerOverlay),
 }
 
 impl ClientShellOverlay {
@@ -623,6 +626,7 @@ impl ClientShellOverlay {
             Self::ContextMenu(_) => ClientShellOverlayKind::ContextMenu,
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
             Self::SpacePicker(_) => ClientShellOverlayKind::SpacePicker,
+            Self::CheckpointPicker(_) => ClientShellOverlayKind::CheckpointPicker,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
         }
     }
@@ -656,6 +660,8 @@ pub(super) enum PendingEndpointKind {
     },
     SpacePickerList,
     SpacePickerReopen,
+    CheckpointList,
+    CheckpointRestore,
     SelectionCopy,
     PaneScroll {
         pane_id: String,

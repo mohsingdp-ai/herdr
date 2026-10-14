@@ -1539,6 +1539,26 @@ impl ClientShellState {
             outcome.repaint = true;
             return;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::CheckpointPicker(_))) {
+            let row_hit = self
+                .hits
+                .worktree_rows
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .map(|(_, position)| *position);
+            match mouse.kind {
+                MouseEventKind::ScrollUp => self.move_checkpoint_picker_selection(-1),
+                MouseEventKind::ScrollDown => self.move_checkpoint_picker_selection(1),
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(position) = row_hit {
+                        self.activate_checkpoint_picker_row(Some(position), outcome);
+                    }
+                }
+                _ => return,
+            }
+            outcome.repaint = true;
+            return;
+        }
         if matches!(self.overlay, Some(ClientShellOverlay::Settings(_))) {
             if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
                 if let Some((_, section)) = self

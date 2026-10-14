@@ -1,5 +1,6 @@
 use super::*;
 
+mod checkpoint_picker_overlay;
 mod settings_overlay;
 mod space_picker_overlay;
 mod worktree_overlays;
@@ -82,6 +83,9 @@ pub(crate) fn render_client_overlay(
         }
         ClientShellOverlay::SpacePicker(v) => {
             space_picker_overlay::render_space_picker_overlay(b, v, p)
+        }
+        ClientShellOverlay::CheckpointPicker(v) => {
+            checkpoint_picker_overlay::render_checkpoint_picker_overlay(b, v, p)
         }
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
     }

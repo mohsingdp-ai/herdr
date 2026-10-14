@@ -16,6 +16,7 @@ mod agent_view_eval;
 mod api;
 mod app;
 mod build_info;
+mod checkpoint;
 mod checksum;
 mod cli;
 mod client;
@@ -420,6 +421,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # allow_nested = false
 # Save recent pane screen history across full server restarts.
 pane_history = false
+# Before an agent works on a prompt, save a hidden git snapshot of its folder
+# so it can be rewound from the agent's or space's right-click menu.
+# checkpoints = false
 # While prefix mode is active, temporarily switch the host input source to
 # an ASCII-capable mode so prefix commands register even when an IME is
 # active, then restore the previous input source when prefix mode exits. On

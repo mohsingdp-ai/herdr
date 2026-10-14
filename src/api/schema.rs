@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod agents;
+pub mod checkpoints;
 pub mod commands;
 pub mod common;
 pub mod events;
@@ -16,6 +17,7 @@ pub mod workspaces;
 pub mod worktrees;
 
 pub use agents::*;
+pub use checkpoints::*;
 pub use commands::*;
 pub use common::*;
 pub use events::*;
@@ -109,6 +111,8 @@ operations::define_operations! {
     PaneClear(PaneTarget) => "pane.clear", true, true;
     PaneEditScrollback(PaneTarget) => "pane.edit_scrollback", true, true;
     PaneToggleEditor(PaneToggleEditorParams) => "pane.toggle_editor", true, true;
+    CheckpointList(CheckpointListParams) => "checkpoint.list", false, true;
+    CheckpointRestore(CheckpointRestoreParams) => "checkpoint.restore", true, true;
     PaneSelectionRead(PaneSelectionReadParams) => "pane.selection.read", false, true;
     PaneCopyMotion(PaneCopyMotionParams) => "pane.copy_motion", false, true;
     PaneCopySearch(PaneCopySearchParams) => "pane.copy_search", false, true;

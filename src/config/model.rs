@@ -1087,6 +1087,10 @@ pub struct ExperimentalConfig {
     pub kitty_graphics: Option<bool>,
     /// Persist pane screen history to session-history.json. Default: false.
     pub pane_history: bool,
+    /// Before an agent works on a prompt, save a hidden git snapshot of its
+    /// folder (`refs/herdr/checkpoints/`) so the folder can be rewound.
+    /// Default: false.
+    pub checkpoints: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`, so macOS native input methods keep tracking
     /// the candidate window when TUIs paint their own cursor (Claude Code, pi,

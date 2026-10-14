@@ -206,6 +206,7 @@ mod tests {
             "plugin.pane.focus",
             "plugin.pane.close",
             "pane.toggle_editor",
+            "checkpoint.restore",
             "workspace.reopen",
         ]
         .into_iter()

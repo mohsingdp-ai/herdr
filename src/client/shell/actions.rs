@@ -841,6 +841,10 @@ impl ClientShellState {
             | PendingEndpointKind::SpacePickerReopen) => {
                 return (self.handle_space_picker_result(kind, result), Vec::new());
             }
+            kind @ (PendingEndpointKind::CheckpointList
+            | PendingEndpointKind::CheckpointRestore) => {
+                return self.handle_checkpoint_picker_result(kind, result);
+            }
             kind => {
                 let mut outcome = ClientShellInput::default();
                 let repaint = self.handle_worktree_endpoint_result(kind, result, &mut outcome);

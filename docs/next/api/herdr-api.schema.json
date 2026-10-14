@@ -1695,6 +1695,40 @@
           ],
           "type": "object"
         },
+        "CheckpointListParams": {
+          "properties": {
+            "pane_id": {
+              "description": "A pane in the folder whose checkpoints to list. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "CheckpointRestoreParams": {
+          "properties": {
+            "checkpoint_id": {
+              "type": "string"
+            },
+            "force": {
+              "description": "Rewind even while an agent is working in the folder.",
+              "type": "boolean"
+            },
+            "pane_id": {
+              "description": "A pane in the folder to rewind. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "checkpoint_id"
+          ],
+          "type": "object"
+        },
         "ClientShellSurfaceSetParams": {
           "description": "Updates whether the requesting client shell receives and controls pane presentation.",
           "properties": {
@@ -5768,6 +5802,38 @@
         {
           "properties": {
             "method": {
+              "const": "checkpoint.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/CheckpointListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "checkpoint.restore",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/CheckpointRestoreParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.selection.read",
               "type": "string"
             },
@@ -6851,6 +6917,29 @@
             "unknown"
           ],
           "type": "string"
+        },
+        "CheckpointInfo": {
+          "description": "A hidden git snapshot of a folder, taken before an agent worked on a prompt.",
+          "properties": {
+            "checkpoint_id": {
+              "type": "string"
+            },
+            "created_at": {
+              "description": "Unix seconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "checkpoint_id",
+            "created_at",
+            "label"
+          ],
+          "type": "object"
         },
         "ClientWindowTitleReason": {
           "enum": [
@@ -9400,6 +9489,51 @@
               "required": [
                 "type",
                 "workspaces"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "checkpoints": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/CheckpointInfo"
+                  },
+                  "type": "array"
+                },
+                "folder": {
+                  "description": "The folder the checkpoints belong to.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "checkpoint_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "folder",
+                "checkpoints"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "checkpoint_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "checkpoint_restored",
+                  "type": "string"
+                },
+                "undo_checkpoint_id": {
+                  "description": "Saved just before rewinding; restore it to undo the rewind.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "checkpoint_id",
+                "undo_checkpoint_id"
               ],
               "type": "object"
             },

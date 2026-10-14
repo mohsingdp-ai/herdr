@@ -266,6 +266,14 @@ mod tests {
             actual.remove("pane.toggle_editor").as_deref(),
             Some("aa5bfd1d8e4599a0ad43e7e7379cb829aed77106bb7d06ccab3f5d95082102b8")
         );
+        assert_eq!(
+            actual.remove("checkpoint.list").as_deref(),
+            Some("4ed4b11392baf9adadb807a4e4a224ab790485d86bd0e49953def9cdaae3f33c")
+        );
+        assert_eq!(
+            actual.remove("checkpoint.restore").as_deref(),
+            Some("1caf00149e2931c8fdf516856367377d18aa11f8ac62d2013b920f3201fd9c7e")
+        );
 
         assert_eq!(
             actual, expected,

@@ -682,3 +682,117 @@ fn space_picker_reopens_filtered_closed_spaces_and_opens_folders() {
     }
     assert_eq!(state.open_folder_path("~other/code"), "~other/code");
 }
+
+#[test]
+fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("frame");
+    let screen_text = |state: &mut ClientShellState| {
+        let frame = state.compose(106, 30).expect("picker frame");
+        frame
+            .cells
+            .chunks(frame.width as usize)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let checkpoint = |id: &str, label: &str| crate::api::schema::CheckpointInfo {
+        checkpoint_id: id.into(),
+        created_at: 0,
+        label: label.into(),
+    };
+
+    // A pane's right-click "Rewind…" lists its folder's checkpoints.
+    let mut outcome = ClientShellInput::default();
+    state.open_checkpoint_picker("pane_1".into(), &mut outcome);
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("rewind should list checkpoints over the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::CheckpointList(params) if params.pane_id.as_deref() == Some("pane_1")
+    ));
+    state.handle_endpoint_result(
+        "boot-1",
+        &request.id,
+        Ok(crate::api::schema::ResponseResult::CheckpointList {
+            folder: "/work/herdr".into(),
+            checkpoints: vec![
+                checkpoint("2", "before codex"),
+                checkpoint("1", "before claude"),
+            ],
+        }),
+    );
+    let text = screen_text(&mut state);
+    for expected in [
+        "rewind · herdr",
+        "before codex",
+        "before claude",
+        "↵ rewind",
+    ] {
+        assert!(text.contains(expected), "missing {expected}:\n{text}");
+    }
+
+    // Down + Enter rewinds to the older checkpoint.
+    state.handle_input_bytes(b"\x1b[B");
+    let rewind = state.handle_input_bytes(b"\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &rewind.actions[..] else {
+        panic!("Enter should rewind over the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::CheckpointRestore(params)
+            if params.checkpoint_id == "1" && params.pane_id.as_deref() == Some("pane_1") && !params.force
+    ));
+    // Success keeps the picker open and asks for the refreshed list.
+    let (_, actions) = state.handle_endpoint_result(
+        "boot-1",
+        &request.id,
+        Ok(crate::api::schema::ResponseResult::CheckpointRestored {
+            checkpoint_id: "1".into(),
+            undo_checkpoint_id: "3".into(),
+        }),
+    );
+    let [ClientShellAction::Endpoint { request, .. }] = &actions[..] else {
+        panic!("a rewind should refresh the list");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::CheckpointList(_)
+    ));
+    assert!(screen_text(&mut state).contains("the top entry undoes it"));
+
+    // A refusal (an agent still working) shows its reason.
+    state.handle_endpoint_result(
+        "boot-1",
+        &request.id,
+        Ok(crate::api::schema::ResponseResult::CheckpointList {
+            folder: "/work/herdr".into(),
+            checkpoints: vec![
+                checkpoint("3", "before rewind"),
+                checkpoint("1", "before claude"),
+            ],
+        }),
+    );
+    let retry = state.handle_input_bytes(b"\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &retry.actions[..] else {
+        panic!("Enter should rewind");
+    };
+    state.handle_endpoint_result(
+        "boot-1",
+        &request.id,
+        Err(ClientShellEndpointError {
+            code: Some("agent_working".into()),
+            message: "an agent is working in this folder; stop it first".into(),
+        }),
+    );
+    assert!(screen_text(&mut state).contains("stop it first"));
+    state.handle_input_bytes(b"\x1b");
+    assert!(state.overlay.is_none());
+}

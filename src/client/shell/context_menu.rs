@@ -18,6 +18,7 @@ impl ClientContextMenuOverlay {
                 item("Close", Action::Close),
                 item("New worktree", Action::NewWorktree),
                 item("Open worktree...", Action::OpenWorktree),
+                item("Rewind…", Action::Rewind),
             ],
             ClientContextMenuTarget::Workspace {
                 is_linked_worktree: true,
@@ -25,6 +26,7 @@ impl ClientContextMenuOverlay {
             } => vec![
                 item("Rename", Action::Rename),
                 item("Close", Action::Close),
+                item("Rewind…", Action::Rewind),
                 item("Delete worktree checkout...", Action::RemoveWorktree),
             ],
             ClientContextMenuTarget::Workspace {
@@ -40,6 +42,7 @@ impl ClientContextMenuOverlay {
                 ),
                 item("New worktree", Action::NewWorktree),
                 item("Open worktree...", Action::OpenWorktree),
+                item("Rewind…", Action::Rewind),
                 item(
                     if *collapsed { "Expand" } else { "Collapse" },
                     Action::ToggleGroup,
@@ -67,6 +70,7 @@ impl ClientContextMenuOverlay {
                     item("Split right", Action::SplitRight),
                     item("Split down", Action::SplitDown),
                     item("Zoom", Action::Zoom),
+                    item("Rewind…", Action::Rewind),
                     item(
                         if *right_click_passthrough {
                             "Use Herdr right-click menu"
@@ -276,6 +280,11 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                 }
             }
+            ClientContextMenuAction::Rewind => {
+                if let Some(pane_id) = self.workspace_folder_pane(&workspace_id) {
+                    self.open_checkpoint_picker(pane_id, outcome);
+                }
+            }
             _ => {}
         }
     }
@@ -455,6 +464,7 @@ impl ClientShellState {
                     .push(ClientShellAction::ClipboardWrite(pane_id.into_bytes()));
             }
             ClientContextMenuAction::ClosePane => self.request_pane_close(pane_id, outcome),
+            ClientContextMenuAction::Rewind => self.open_checkpoint_picker(pane_id, outcome),
             _ => {}
         }
     }

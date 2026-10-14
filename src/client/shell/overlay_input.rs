@@ -635,6 +635,7 @@ impl ClientShellState {
 
         if self.route_worktree_overlay_key(key, outcome)
             || self.route_space_picker_key(key, outcome)
+            || self.route_checkpoint_picker_key(key, outcome)
         {
             return;
         }
