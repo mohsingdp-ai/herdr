@@ -706,6 +706,8 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
         checkpoint_id: id.into(),
         created_at: 0,
         label: label.into(),
+        agent: Some("claude".into()),
+        changed_files: vec!["src/a.rs".into(), "src/b.rs".into()],
     };
 
     // A pane's right-click "Rewind…" lists its folder's checkpoints.
@@ -735,6 +737,8 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
         "before codex",
         "before claude",
         "↵ rewind",
+        "claude · 2 files",
+        "changed: a.rs, b.rs",
     ] {
         assert!(text.contains(expected), "missing {expected}:\n{text}");
     }

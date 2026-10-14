@@ -19,9 +19,9 @@ pub(super) fn render_checkpoint_picker_overlay(
             .as_ref()
             .map(|notice| (format!(" {notice}"), p.green))
     };
-    // title, divider, list, status
-    let height = 2 + list_height + u16::from(status.is_some()) + 2;
-    let popup = popup(b.area, 72, height)?;
+    // title, divider, list, divider, changed files, status
+    let height = 2 + list_height + 2 + u16::from(status.is_some()) + 2;
+    let popup = popup(b.area, 84, height)?;
     let inner = panel(b, popup, p.accent, p.panel_bg)?;
     let base = Style::default().fg(p.text).bg(p.panel_bg);
     let dim = Style::default().fg(p.overlay0).bg(p.panel_bg);
@@ -57,6 +57,16 @@ pub(super) fn render_checkpoint_picker_overlay(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
+    let local_now = crate::platform::local_datetime();
+    // Wall-clock time of a checkpoint, from the local time now and its age.
+    let clock = |created_at: u64| {
+        let ago = time::Duration::seconds(now.saturating_sub(created_at) as i64);
+        local_now
+            .and_then(|local| local.checked_sub(ago))
+            .map_or_else(String::new, |at| {
+                format!("{:02}:{:02}", at.hour(), at.minute())
+            })
+    };
     let start = picker
         .selected
         .min(picker.entries.len().saturating_sub(1))
@@ -77,16 +87,25 @@ pub(super) fn render_checkpoint_picker_overlay(
             base
         };
         b.set_style(rect, style);
+        let age = super::super::space_picker::closed_age(entry.created_at, now);
+        let files = match entry.changed_files.len() {
+            1 => "1 file".to_owned(),
+            count => format!("{count} files"),
+        };
+        let right = match &entry.agent {
+            Some(agent) => format!("{agent} · {files}  {age:>3} "),
+            None => format!("{files}  {age:>3} "),
+        };
+        let right_width = display_width(&right);
         put_text(
             b,
             rect.x,
             rect.y,
-            rect.width,
-            &format!(" {}", entry.label),
+            rect.width.saturating_sub(right_width + 1),
+            &format!(" {}  {}", clock(entry.created_at), entry.label),
             style,
         );
-        let age = super::super::space_picker::closed_age(entry.created_at, now);
-        put_right_text(b, rect, rect.y, &format!("{age} "), style);
+        put_right_text(b, rect, rect.y, &right, style);
         row_hits.push((rect, position));
     }
     if picker.entries.is_empty() {
@@ -100,6 +119,34 @@ pub(super) fn render_checkpoint_picker_overlay(
             " no checkpoints yet · saved before each prompt when experimental.checkpoints is on"
         };
         put_text(b, list.x, list.y, list.width, message, dim);
+    }
+    // The highlighted checkpoint's changed files.
+    let changed_y = list.bottom();
+    put_text(
+        b,
+        inner.x,
+        changed_y,
+        inner.width,
+        &"─".repeat(inner.width as usize),
+        Style::default().fg(p.surface1).bg(p.panel_bg),
+    );
+    if let Some(entry) = picker.entries.get(picker.selected) {
+        let shown = 6;
+        let names: Vec<&str> = entry
+            .changed_files
+            .iter()
+            .take(shown)
+            .map(|path| path.rsplit('/').next().unwrap_or(path))
+            .collect();
+        let more = entry.changed_files.len().saturating_sub(shown);
+        let text = if names.is_empty() {
+            " no file changes after this point".to_owned()
+        } else if more > 0 {
+            format!(" changed: {}, +{more}", names.join(", "))
+        } else {
+            format!(" changed: {}", names.join(", "))
+        };
+        put_text(b, inner.x, changed_y + 1, inner.width, &text, dim);
     }
     if let Some((text, color)) = status {
         put_text(

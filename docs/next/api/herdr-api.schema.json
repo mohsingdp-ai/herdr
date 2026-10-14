@@ -6921,6 +6921,19 @@
         "CheckpointInfo": {
           "description": "A hidden git snapshot of a folder, taken before an agent worked on a prompt.",
           "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "changed_files": {
+              "description": "Files changed after it: up to the next checkpoint, or the folder now.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "checkpoint_id": {
               "type": "string"
             },
@@ -6931,6 +6944,7 @@
               "type": "integer"
             },
             "label": {
+              "description": "The prompt it was taken before, quoted, or a fallback like \"before claude\".",
               "type": "string"
             }
           },

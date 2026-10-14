@@ -16,6 +16,9 @@ const MAX_NEW_FILE_BYTES: u64 = 10 * 1024 * 1024;
 /// Snapshots kept per folder; older ones are deleted.
 const KEEP_PER_FOLDER: usize = 50;
 const FOLDER_TRAILER: &str = "Herdr-Folder";
+const AGENT_TRAILER: &str = "Herdr-Agent";
+/// Longest prompt kept as a checkpoint's label.
+const MAX_PROMPT_CHARS: usize = 72;
 
 // ponytail: one lock for all checkpoint git work; per-folder locks if snapshots ever queue up.
 static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -27,6 +30,10 @@ pub(crate) struct Checkpoint {
     /// Unix seconds.
     pub(crate) created_at: u64,
     pub(crate) label: String,
+    /// The agent whose prompt this snapshot came before.
+    pub(crate) agent: Option<String>,
+    /// Files changed after this snapshot: up to the next one, or the folder now.
+    pub(crate) changed_files: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -44,10 +51,14 @@ impl From<io::Error> for RestoreError {
 }
 
 /// Snapshots `cwd`'s folder unless nothing changed since its newest snapshot.
-pub(crate) fn snapshot(cwd: &Path, label: &str) -> io::Result<Option<Checkpoint>> {
+pub(crate) fn snapshot(
+    cwd: &Path,
+    label: &str,
+    agent: Option<&str>,
+) -> io::Result<Option<Checkpoint>> {
     let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = toplevel(cwd)?;
-    let checkpoint = snapshot_root(&root, label)?;
+    let checkpoint = snapshot_root(&root, label, agent)?;
     prune_missing_folders(&root)?;
     Ok(checkpoint)
 }
@@ -56,8 +67,50 @@ pub(crate) fn snapshot(cwd: &Path, label: &str) -> io::Result<Option<Checkpoint>
 pub(crate) fn list(cwd: &Path) -> io::Result<(PathBuf, Vec<Checkpoint>)> {
     let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = toplevel(cwd)?;
-    let checkpoints = folder_checkpoints(&root)?;
+    let mut checkpoints = folder_checkpoints(&root)?;
+    // What each prompt changed: this snapshot against the next newer one.
+    let prefix = folder_prefix(&root);
+    let mut newer = write_tree(&root)?;
+    for checkpoint in &mut checkpoints {
+        let tree = format!("{prefix}{}^{{tree}}", checkpoint.id);
+        let changed =
+            run_bytes(git(&root).args(["diff-tree", "-r", "-z", "--name-only", &tree, &newer]))?;
+        checkpoint.changed_files = nul_separated(&changed).map(str::to_owned).collect();
+        newer = tree;
+    }
     Ok((root, checkpoints))
+}
+
+/// The prompt just sent to an agent, read off the bottom of its screen: the
+/// last `❯`, `›` or `>` line with text, above the input box when the box is
+/// drawn between rules. Shortened to its first `MAX_PROMPT_CHARS` characters.
+pub(crate) fn last_prompt(screen: &str) -> Option<String> {
+    let lines: Vec<&str> = screen.lines().collect();
+    let is_rule = |line: &&str| {
+        let line = line.trim();
+        line.chars().count() >= 8 && line.chars().all(|c| matches!(c, '─' | '━' | '═'))
+    };
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| is_rule(&lines[i])).collect();
+    // The input box sits between the last two rules; its text is not sent yet.
+    let end = match rules.as_slice() {
+        [.., box_top, _] => *box_top,
+        _ => lines.len(),
+    };
+    lines[..end].iter().rev().find_map(|line| {
+        let line = line.trim_start();
+        let text = ["❯", "›", ">"]
+            .iter()
+            .find_map(|marker| line.strip_prefix(marker))?
+            .trim();
+        if text.is_empty() {
+            return None;
+        }
+        let mut prompt: String = text.chars().take(MAX_PROMPT_CHARS).collect();
+        if text.chars().count() > MAX_PROMPT_CHARS {
+            prompt.push('…');
+        }
+        Some(prompt)
+    })
 }
 
 /// Puts the folder back to checkpoint `id`: files are restored, files created
@@ -90,7 +143,7 @@ pub(crate) fn restore(
     let target_ref = format!("{}{}", folder_prefix(&root), target.id);
     let undo_label = "before rewind";
     // Unchanged since the newest snapshot: that one already is the undo point.
-    let undo_id = match snapshot_root(&root, undo_label)? {
+    let undo_id = match snapshot_root(&root, undo_label, None)? {
         Some(undo) => undo.id,
         None => checkpoints
             .first()
@@ -120,7 +173,7 @@ pub(crate) fn restore(
     Ok(undo_id)
 }
 
-fn snapshot_root(root: &Path, label: &str) -> io::Result<Option<Checkpoint>> {
+fn snapshot_root(root: &Path, label: &str, agent: Option<&str>) -> io::Result<Option<Checkpoint>> {
     let tree = write_tree(root)?;
     let prefix = folder_prefix(root);
     let newest_tree = run(git(root).args([
@@ -136,10 +189,14 @@ fn snapshot_root(root: &Path, label: &str) -> io::Result<Option<Checkpoint>> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
+    let mut trailers = format!("{FOLDER_TRAILER}: {}", root.display());
+    if let Some(agent) = agent {
+        trailers.push_str(&format!("\n{AGENT_TRAILER}: {agent}"));
+    }
     let mut commit = git(root);
     commit
         .args(["commit-tree", &tree, "-m", label, "-m"])
-        .arg(format!("{FOLDER_TRAILER}: {}", root.display()))
+        .arg(trailers)
         .envs([
             ("GIT_AUTHOR_NAME", "herdr"),
             ("GIT_AUTHOR_EMAIL", "herdr@localhost"),
@@ -158,6 +215,8 @@ fn snapshot_root(root: &Path, label: &str) -> io::Result<Option<Checkpoint>> {
         id,
         created_at: now.as_secs(),
         label: label.to_owned(),
+        agent: agent.map(str::to_owned),
+        changed_files: Vec::new(),
     }))
 }
 
@@ -205,23 +264,33 @@ fn write_tree(root: &Path) -> io::Result<String> {
 }
 
 fn folder_checkpoints(root: &Path) -> io::Result<Vec<Checkpoint>> {
+    // One record per ref, ended by \x01 since the trailer value ends in a newline.
     let listed = run(git(root).args([
         "for-each-ref",
         "--sort=-refname",
-        "--format=%(refname)%00%(committerdate:unix)%00%(subject)",
+        &format!(
+            "--format=%(refname)%00%(committerdate:unix)%00%(subject)%00%(trailers:key={AGENT_TRAILER},valueonly)%01"
+        ),
         &folder_prefix(root),
     ]))?;
     Ok(listed
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split('\0');
+        .split('\x01')
+        .filter_map(|record| {
+            let mut fields = record.trim_start().split('\0');
             let id = fields.next()?.rsplit('/').next()?.to_owned();
             let created_at = fields.next()?.parse().ok()?;
             let label = fields.next().unwrap_or_default().to_owned();
+            let agent = fields
+                .next()
+                .map(str::trim)
+                .filter(|agent| !agent.is_empty())
+                .map(str::to_owned);
             Some(Checkpoint {
                 id,
                 created_at,
                 label,
+                agent,
+                changed_files: Vec::new(),
             })
         })
         .collect())
@@ -367,11 +436,11 @@ mod tests {
     #[test]
     fn rewind_restores_files_deletes_new_ones_and_keeps_ignored_and_staged() {
         let root = repo("rewind");
-        let first = snapshot(&root, "before claude")
+        let first = snapshot(&root, "\"fix a.rs\"", Some("claude"))
             .unwrap()
             .expect("first snapshot");
         assert_eq!(
-            snapshot(&root, "again").unwrap(),
+            snapshot(&root, "again", None).unwrap(),
             None,
             "unchanged folder is not snapshotted twice"
         );
@@ -426,10 +495,13 @@ mod tests {
         assert_eq!(read(&root, "b.rs"), None);
 
         let (_, listed) = list(&root).unwrap();
-        assert_eq!(
-            listed.last().map(|c| c.label.as_str()),
-            Some("before claude")
-        );
+        let oldest = listed.last().expect("oldest checkpoint");
+        assert_eq!(oldest.label, "\"fix a.rs\"");
+        assert_eq!(oldest.agent.as_deref(), Some("claude"));
+        // The prompt's changes: everything the agent did before the undo point.
+        let mut changed = oldest.changed_files.clone();
+        changed.sort();
+        assert_eq!(changed, ["a.rs", "b.rs", "new.rs", "notes.md"]);
         let branches = Command::new("git")
             .arg("-C")
             .arg(&root)
@@ -447,7 +519,7 @@ mod tests {
     #[test]
     fn snapshots_of_deleted_folders_are_pruned() {
         let root = repo("prune");
-        snapshot(&root, "main").unwrap();
+        snapshot(&root, "main", None).unwrap();
         let gone =
             std::env::temp_dir().join(format!("herdr-checkpoint-gone-{}", std::process::id()));
         // A snapshot of a folder that has since been deleted, like a removed worktree.
@@ -460,10 +532,33 @@ mod tests {
         run(git(&root).args(["update-ref", &format!("{}1", folder_prefix(&gone)), &tagged]))
             .unwrap();
         std::fs::write(root.join("a.rs"), "changed").unwrap();
-        snapshot(&root, "main again").unwrap();
+        snapshot(&root, "main again", None).unwrap();
         let left = run(git(&root).args(["for-each-ref", "--format=%(refname)", REF_ROOT])).unwrap();
         assert!(!left.contains(&folder_prefix(&gone)), "{left}");
         assert_eq!(left.lines().count(), 2);
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::last_prompt;
+
+    #[test]
+    fn last_prompt_is_the_sent_message_above_the_input_box() {
+        // Claude Code: sent message, output, then the input box between rules.
+        let claude = "❯ what this repo about\n  Listed 2 directories\n● A web app\n────────────────\n❯ \n────────────────\n  ⏵⏵ bypass permissions on";
+        assert_eq!(last_prompt(claude).as_deref(), Some("what this repo about"));
+        // Text typed into the input box is not sent yet.
+        let typing = "❯ fix the tests\n✻ Thinking…\n────────\n❯ next idea\n────────";
+        assert_eq!(last_prompt(typing).as_deref(), Some("fix the tests"));
+        // No rules: the last marker line with text.
+        assert_eq!(
+            last_prompt("› add a git panel\n• working").as_deref(),
+            Some("add a git panel")
+        );
+        assert_eq!(last_prompt("no prompt here\n"), None);
+        let long = format!("❯ {}", "x".repeat(100));
+        assert_eq!(last_prompt(&long).map(|p| p.chars().count()), Some(73));
     }
 }

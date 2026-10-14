@@ -30,10 +30,20 @@ impl App {
         let Some(cwd) = self.launch_cwd_for_pane_in_workspace(ws_idx, pane_id) else {
             return;
         };
-        let label = format!("before {}", agent.unwrap_or("agent"));
+        // Label it with the prompt just sent, read off the bottom of the screen.
+        let prompt = self
+            .state
+            .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)
+            .and_then(|runtime| crate::checkpoint::last_prompt(&runtime.detection_text()));
+        let agent = agent.map(str::to_owned);
+        let label = match (&prompt, &agent) {
+            (Some(prompt), _) => format!("\"{prompt}\""),
+            (None, Some(agent)) => format!("before {agent}"),
+            (None, None) => "before agent".to_owned(),
+        };
         let spawned = crate::thread_spawn::spawn_named("herdr-checkpoint", move || {
             // Folders outside git just have no checkpoints.
-            if let Err(err) = crate::checkpoint::snapshot(&cwd, &label) {
+            if let Err(err) = crate::checkpoint::snapshot(&cwd, &label, agent.as_deref()) {
                 tracing::debug!(err = %err, cwd = %cwd.display(), "checkpoint skipped");
             }
         });
@@ -66,6 +76,8 @@ impl App {
                                         checkpoint_id: checkpoint.id,
                                         created_at: checkpoint.created_at,
                                         label: checkpoint.label,
+                                        agent: checkpoint.agent,
+                                        changed_files: checkpoint.changed_files,
                                     })
                                     .collect(),
                             },
