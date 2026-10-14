@@ -113,6 +113,11 @@ impl App {
                                 "agent_working",
                                 "an agent is working in this folder; stop it first",
                             ),
+                            Err(crate::checkpoint::RestoreError::AlreadyThere) => encode_error(
+                                id,
+                                "already_there",
+                                "your files already match this point",
+                            ),
                             Err(crate::checkpoint::RestoreError::Git(err)) => {
                                 encode_error(id, "restore_failed", err.to_string())
                             }

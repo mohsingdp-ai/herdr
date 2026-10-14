@@ -18,6 +18,10 @@ pub(super) struct ClientCheckpointPickerOverlay {
     pub(super) unsupported: bool,
     /// List every prompt, not only those that changed files.
     pub(super) show_all: bool,
+    /// The checkpoint last refused because an agent is working; `f` forces it.
+    pub(super) force_ready: Option<String>,
+    /// The checkpoint the pending rewind targets.
+    pub(super) pending: Option<String>,
 }
 
 /// A picker row, pointing into `entries`.
@@ -36,14 +40,15 @@ impl ClientCheckpointPickerOverlay {
         entry.agent.is_none() && entry.label.starts_with("before rewind")
     }
 
-    /// The last rewind while nothing has run since, then the prompts: only
-    /// those that changed files unless `show_all`.
+    /// The last rewind's undo point while no prompt has changed files since,
+    /// then the prompts: only those that changed files unless `show_all`.
     pub(super) fn rows(&self) -> Vec<ClientCheckpointRow> {
         let undo = self
             .entries
-            .first()
-            .filter(|entry| Self::is_undo(entry))
-            .map(|_| ClientCheckpointRow::UndoRewind(0));
+            .iter()
+            .position(|entry| Self::is_undo(entry) || !entry.changed_files.is_empty())
+            .filter(|&index| Self::is_undo(&self.entries[index]))
+            .map(ClientCheckpointRow::UndoRewind);
         undo.into_iter()
             .chain(
                 self.entries
@@ -117,6 +122,7 @@ impl ClientShellState {
             KeyCode::Char('p') if control => self.move_checkpoint_picker_selection(-1),
             KeyCode::Char('n') if control => self.move_checkpoint_picker_selection(1),
             KeyCode::Char('a') if !control => self.toggle_checkpoint_picker_all(),
+            KeyCode::Char('f') if !control => self.force_checkpoint_restore(outcome),
             _ => {}
         }
         true
@@ -168,9 +174,33 @@ impl ClientShellState {
             return;
         };
         picker.selected = position;
+        self.send_checkpoint_restore(checkpoint_id, false, outcome);
+    }
+
+    /// Goes back anyway after a refusal because an agent is working.
+    fn force_checkpoint_restore(&mut self, outcome: &mut ClientShellInput) {
+        let Some(ClientShellOverlay::CheckpointPicker(picker)) = self.overlay.as_mut() else {
+            return;
+        };
+        if let Some(checkpoint_id) = picker.force_ready.take() {
+            self.send_checkpoint_restore(checkpoint_id, true, outcome);
+        }
+    }
+
+    fn send_checkpoint_restore(
+        &mut self,
+        checkpoint_id: String,
+        force: bool,
+        outcome: &mut ClientShellInput,
+    ) {
+        let Some(ClientShellOverlay::CheckpointPicker(picker)) = self.overlay.as_mut() else {
+            return;
+        };
         picker.restoring = true;
         picker.error = None;
         picker.notice = None;
+        picker.force_ready = None;
+        picker.pending = Some(checkpoint_id.clone());
         let pane_id = picker.pane_id.clone();
         outcome.repaint = true;
         let sent = self.push_endpoint_method_with_kind(
@@ -178,7 +208,7 @@ impl ClientShellState {
                 crate::api::schema::CheckpointRestoreParams {
                     pane_id: Some(pane_id),
                     checkpoint_id,
-                    force: false,
+                    force,
                 },
             ),
             PendingEndpointKind::CheckpointRestore,
@@ -222,6 +252,14 @@ impl ClientShellState {
                 let mut outcome = ClientShellInput::default();
                 self.request_checkpoint_list(pane_id, &mut outcome);
                 return (true, outcome.actions);
+            }
+            (_, Err(error)) if error.code.as_deref() == Some("agent_working") => {
+                picker.loading = false;
+                picker.restoring = false;
+                picker.force_ready = picker.pending.take();
+                picker.error = Some(
+                    "an agent is working in this folder · press f to go back anyway".to_owned(),
+                );
             }
             (_, Err(error)) => {
                 picker.loading = false;

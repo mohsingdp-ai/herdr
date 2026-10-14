@@ -793,6 +793,12 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
         Ok(crate::api::schema::ResponseResult::CheckpointList {
             folder: "/work/herdr".into(),
             checkpoints: vec![
+                // A question asked after the rewind changed nothing...
+                crate::api::schema::CheckpointInfo {
+                    changed_files: Vec::new(),
+                    ..checkpoint("4", "\"did it work\"")
+                },
+                // ...so the rewind's undo point is still offered.
                 crate::api::schema::CheckpointInfo {
                     agent: None,
                     ..checkpoint("3", "before rewind to \"before claude\"")
@@ -821,7 +827,16 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
             message: "an agent is working in this folder; stop it first".into(),
         }),
     );
-    assert!(screen_text(&mut state).contains("stop it first"));
+    assert!(screen_text(&mut state).contains("press f to go back anyway"));
+    // f goes back anyway, to the same checkpoint.
+    let forced = state.handle_input_bytes(b"f");
+    let [ClientShellAction::Endpoint { request, .. }] = &forced.actions[..] else {
+        panic!("f should force the rewind");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::CheckpointRestore(params) if params.checkpoint_id == "3" && params.force
+    ));
     state.handle_input_bytes(b"\x1b");
     assert!(state.overlay.is_none());
 }

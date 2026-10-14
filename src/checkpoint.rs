@@ -42,6 +42,8 @@ pub(crate) enum RestoreError {
     NotFound,
     /// Agents still working in the folder; rewinding would pull files out from under them.
     Busy,
+    /// The folder already matches the checkpoint; nothing to rewind.
+    AlreadyThere,
     Git(io::Error),
 }
 
@@ -61,7 +63,7 @@ pub(crate) fn snapshot(
 ) -> io::Result<Option<Checkpoint>> {
     let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = toplevel(cwd)?;
-    let checkpoint = snapshot_root(&root, label, agent)?;
+    let checkpoint = snapshot_root(&root, label, agent, false)?;
     prune_missing_folders(&root)?;
     Ok(checkpoint)
 }
@@ -158,15 +160,16 @@ pub(crate) fn restore(
         prompt = rest;
     }
     let undo_label = format!("before rewind to {prompt}");
-    // Unchanged since the newest snapshot: that one already is the undo point.
-    let undo_id = match snapshot_root(&root, &undo_label, None)? {
-        Some(undo) => undo.id,
-        None => checkpoints
-            .first()
-            .map(|newest| newest.id.clone())
-            .unwrap_or_default(),
-    };
     let now_tree = write_tree(&root)?;
+    let target_tree = run(git(&root).args(["rev-parse", &format!("{target_ref}^{{tree}}")]))?;
+    if target_tree == now_tree {
+        return Err(RestoreError::AlreadyThere);
+    }
+    // Always its own entry, so the picker can offer "undo last rewind" even
+    // when nothing changed since the newest prompt.
+    let undo_id = snapshot_root(&root, &undo_label, None, true)?
+        .map(|undo| undo.id)
+        .unwrap_or_default();
     let added = run_bytes(git(&root).args([
         "diff-tree",
         "-r",
@@ -189,7 +192,13 @@ pub(crate) fn restore(
     Ok(undo_id)
 }
 
-fn snapshot_root(root: &Path, label: &str, agent: Option<&str>) -> io::Result<Option<Checkpoint>> {
+/// `force` saves an entry even when it repeats the newest one.
+fn snapshot_root(
+    root: &Path,
+    label: &str,
+    agent: Option<&str>,
+    force: bool,
+) -> io::Result<Option<Checkpoint>> {
     let tree = write_tree(root)?;
     let prefix = folder_prefix(root);
     let newest = run(git(root).args([
@@ -212,7 +221,7 @@ fn snapshot_root(root: &Path, label: &str, agent: Option<&str>) -> io::Result<Op
     let (newest_core, core) = (core(newest_label), core(label));
     let repeat =
         newest_agent == agent && (newest_core.starts_with(&core) || core.starts_with(&newest_core));
-    if newest_tree == tree && (agent.is_none() || repeat) {
+    if !force && newest_tree == tree && (agent.is_none() || repeat) {
         return Ok(None);
     }
     let now = SystemTime::now()
@@ -507,6 +516,14 @@ mod tests {
             Err(RestoreError::Busy)
         ));
         let undo = restore(&root, &first.id, &[], false).expect("rewind");
+        // The rewind saved its own undo point, and going back again is a no-op.
+        let (_, after) = list(&root).unwrap();
+        assert_eq!(after[0].id, undo);
+        assert!(after[0].agent.is_none() && after[0].label.starts_with("before rewind to"));
+        assert!(matches!(
+            restore(&root, &first.id, &[], false),
+            Err(RestoreError::AlreadyThere)
+        ));
         assert_eq!(read(&root, "a.rs").as_deref(), Some("v1"));
         assert_eq!(read(&root, "b.rs").as_deref(), Some("keep"));
         assert_eq!(read(&root, "notes.md").as_deref(), Some("untracked"));
