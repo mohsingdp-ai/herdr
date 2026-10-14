@@ -105,6 +105,14 @@ pub(crate) fn last_prompt(screen: &str) -> Option<String> {
             .iter()
             .find_map(|marker| line.strip_prefix(marker))?
             .trim();
+        // Agents pad the echoed message to the full width and may draw a box
+        // edge or right-aligned text after it; keep what comes before.
+        let text = text
+            .split("   ")
+            .next()
+            .unwrap_or(text)
+            .trim_end_matches(['│', '┃', '▏', '|'])
+            .trim();
         if text.is_empty() {
             return None;
         }
@@ -144,7 +152,12 @@ pub(crate) fn restore(
         return Err(RestoreError::Busy);
     }
     let target_ref = format!("{}{}", folder_prefix(&root), target.id);
-    let undo_label = format!("before rewind to {}", target.label);
+    // Undoing an undo names the prompt, not a chain of "before rewind to".
+    let mut prompt = target.label.as_str();
+    while let Some(rest) = prompt.strip_prefix("before rewind to ") {
+        prompt = rest;
+    }
+    let undo_label = format!("before rewind to {prompt}");
     // Unchanged since the newest snapshot: that one already is the undo point.
     let undo_id = match snapshot_root(&root, &undo_label, None)? {
         Some(undo) => undo.id,
@@ -192,9 +205,13 @@ fn snapshot_root(root: &Path, label: &str, agent: Option<&str>) -> io::Result<Op
         newest.next().unwrap_or_default(),
         newest.next().filter(|agent| !agent.is_empty()),
     );
-    // A prompt always gets its own entry, so the list shows every prompt; an
-    // exact repeat (the agent flickering idle → working) does not.
-    let repeat = newest_label == label && newest_agent == agent;
+    // A prompt always gets its own entry, so the list shows every prompt; a
+    // repeat does not: the agent flickering idle → working re-reads the same
+    // prompt, sometimes only part of a wrapped one.
+    let core = |label: &str| label.trim_matches(['"', '…']).trim().to_owned();
+    let (newest_core, core) = (core(newest_label), core(label));
+    let repeat =
+        newest_agent == agent && (newest_core.starts_with(&core) || core.starts_with(&newest_core));
     if newest_tree == tree && (agent.is_none() || repeat) {
         return Ok(None);
     }
@@ -466,6 +483,11 @@ mod tests {
             snapshot(&root, "\"what is this\"", Some("claude")).unwrap(),
             None
         );
+        // A partial re-read of the same prompt (status flicker) is a repeat too.
+        assert_eq!(
+            snapshot(&root, "\"what is\"", Some("claude")).unwrap(),
+            None
+        );
 
         // The agent's turn: edit, delete tracked and untracked files, create one, rebuild.
         std::fs::write(root.join("a.rs"), "v2").unwrap();
@@ -517,6 +539,8 @@ mod tests {
         assert_eq!(read(&root, "b.rs"), None);
 
         let (_, listed) = list(&root).unwrap();
+        // Undoing the undo names the prompt once, not "before rewind to before rewind to".
+        assert_eq!(listed[0].label, "before rewind to \"fix a.rs\"");
         let [.., question, oldest] = listed.as_slice() else {
             panic!("expected both prompt entries: {listed:?}");
         };
@@ -587,6 +611,11 @@ mod prompt_tests {
             Some("add a git panel")
         );
         assert_eq!(last_prompt("no prompt here\n"), None);
+        // Full-width padding and a box edge after the message are dropped.
+        assert_eq!(
+            last_prompt("❯ /changes                                         │").as_deref(),
+            Some("/changes")
+        );
         let long = format!("❯ {}", "x".repeat(100));
         assert_eq!(last_prompt(&long).map(|p| p.chars().count()), Some(73));
     }
