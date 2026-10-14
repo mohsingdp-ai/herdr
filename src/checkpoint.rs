@@ -13,8 +13,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const REF_ROOT: &str = "refs/herdr/checkpoints";
 /// New files bigger than this stay out of snapshots, and so out of rewinds.
 const MAX_NEW_FILE_BYTES: u64 = 10 * 1024 * 1024;
-/// Snapshots kept per folder; older ones are deleted.
-const KEEP_PER_FOLDER: usize = 50;
+/// Snapshots kept per folder; older ones are deleted. Prompts that changed
+/// nothing reuse the previous tree, so their entries cost a few hundred bytes.
+const KEEP_PER_FOLDER: usize = 200;
 const FOLDER_TRAILER: &str = "Herdr-Folder";
 const AGENT_TRAILER: &str = "Herdr-Agent";
 /// Longest prompt kept as a checkpoint's label.
@@ -50,7 +51,9 @@ impl From<io::Error> for RestoreError {
     }
 }
 
-/// Snapshots `cwd`'s folder unless nothing changed since its newest snapshot.
+/// Snapshots `cwd`'s folder before an agent's prompt (`agent` set): one entry
+/// per prompt, even when no files changed, unless it repeats the newest entry
+/// exactly. Without an agent, it is skipped whenever nothing changed.
 pub(crate) fn snapshot(
     cwd: &Path,
     label: &str,
@@ -141,9 +144,9 @@ pub(crate) fn restore(
         return Err(RestoreError::Busy);
     }
     let target_ref = format!("{}{}", folder_prefix(&root), target.id);
-    let undo_label = "before rewind";
+    let undo_label = format!("before rewind to {}", target.label);
     // Unchanged since the newest snapshot: that one already is the undo point.
-    let undo_id = match snapshot_root(&root, undo_label, None)? {
+    let undo_id = match snapshot_root(&root, &undo_label, None)? {
         Some(undo) => undo.id,
         None => checkpoints
             .first()
@@ -176,14 +179,23 @@ pub(crate) fn restore(
 fn snapshot_root(root: &Path, label: &str, agent: Option<&str>) -> io::Result<Option<Checkpoint>> {
     let tree = write_tree(root)?;
     let prefix = folder_prefix(root);
-    let newest_tree = run(git(root).args([
+    let newest = run(git(root).args([
         "for-each-ref",
         "--count=1",
         "--sort=-refname",
-        "--format=%(tree)",
+        &format!("--format=%(tree)%00%(subject)%00%(trailers:key={AGENT_TRAILER},valueonly)"),
         &prefix,
     ]))?;
-    if newest_tree == tree {
+    let mut newest = newest.split('\0').map(str::trim);
+    let (newest_tree, newest_label, newest_agent) = (
+        newest.next().unwrap_or_default(),
+        newest.next().unwrap_or_default(),
+        newest.next().filter(|agent| !agent.is_empty()),
+    );
+    // A prompt always gets its own entry, so the list shows every prompt; an
+    // exact repeat (the agent flickering idle → working) does not.
+    let repeat = newest_label == label && newest_agent == agent;
+    if newest_tree == tree && (agent.is_none() || repeat) {
         return Ok(None);
     }
     let now = SystemTime::now()
@@ -444,6 +456,16 @@ mod tests {
             None,
             "unchanged folder is not snapshotted twice"
         );
+        // Every prompt is listed, even one that changed nothing, but not a repeat.
+        let question = snapshot(&root, "\"what is this\"", Some("claude")).unwrap();
+        assert!(
+            question.is_some(),
+            "a prompt without changes still gets an entry"
+        );
+        assert_eq!(
+            snapshot(&root, "\"what is this\"", Some("claude")).unwrap(),
+            None
+        );
 
         // The agent's turn: edit, delete tracked and untracked files, create one, rebuild.
         std::fs::write(root.join("a.rs"), "v2").unwrap();
@@ -495,11 +517,18 @@ mod tests {
         assert_eq!(read(&root, "b.rs"), None);
 
         let (_, listed) = list(&root).unwrap();
-        let oldest = listed.last().expect("oldest checkpoint");
+        let [.., question, oldest] = listed.as_slice() else {
+            panic!("expected both prompt entries: {listed:?}");
+        };
         assert_eq!(oldest.label, "\"fix a.rs\"");
         assert_eq!(oldest.agent.as_deref(), Some("claude"));
-        // The prompt's changes: everything the agent did before the undo point.
-        let mut changed = oldest.changed_files.clone();
+        assert!(
+            oldest.changed_files.is_empty(),
+            "nothing changed before the next prompt"
+        );
+        // The agent's work happened after the second prompt, so it is listed there.
+        assert_eq!(question.label, "\"what is this\"");
+        let mut changed = question.changed_files.clone();
         changed.sort();
         assert_eq!(changed, ["a.rs", "b.rs", "new.rs", "notes.md"]);
         let branches = Command::new("git")

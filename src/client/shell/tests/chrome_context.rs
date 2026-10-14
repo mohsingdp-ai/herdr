@@ -728,6 +728,11 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
             checkpoints: vec![
                 checkpoint("2", "before codex"),
                 checkpoint("1", "before claude"),
+                // A prompt that changed nothing is still listed.
+                crate::api::schema::CheckpointInfo {
+                    changed_files: Vec::new(),
+                    ..checkpoint("0", "\"what is this\"")
+                },
             ],
         }),
     );
@@ -739,6 +744,8 @@ fn rewind_picker_lists_checkpoints_rewinds_and_refreshes() {
         "↵ rewind",
         "claude · 2 files",
         "changed: a.rs, b.rs",
+        "\"what is this\"",
+        "claude · no changes",
     ] {
         assert!(text.contains(expected), "missing {expected}:\n{text}");
     }

@@ -81,14 +81,19 @@ pub(super) fn render_checkpoint_picker_overlay(
         .enumerate()
     {
         let rect = Rect::new(list.x, list.y + offset as u16, list.width, 1);
+        // Prompts that changed nothing stay listed, but dimmed.
+        let quiet = entry.agent.is_some() && entry.changed_files.is_empty();
         let style = if position == picker.selected {
             Style::default().fg(contrast(p)).bg(p.accent)
+        } else if quiet {
+            dim
         } else {
             base
         };
         b.set_style(rect, style);
         let age = super::super::space_picker::closed_age(entry.created_at, now);
         let files = match entry.changed_files.len() {
+            0 => "no changes".to_owned(),
             1 => "1 file".to_owned(),
             count => format!("{count} files"),
         };
@@ -139,7 +144,9 @@ pub(super) fn render_checkpoint_picker_overlay(
             .map(|path| path.rsplit('/').next().unwrap_or(path))
             .collect();
         let more = entry.changed_files.len().saturating_sub(shown);
-        let text = if names.is_empty() {
+        let text = if names.is_empty() && entry.agent.is_some() {
+            " this prompt changed no files".to_owned()
+        } else if names.is_empty() {
             " no file changes after this point".to_owned()
         } else if more > 0 {
             format!(" changed: {}, +{more}", names.join(", "))
