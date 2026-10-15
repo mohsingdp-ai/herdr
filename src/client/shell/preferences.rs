@@ -28,6 +28,9 @@ pub(super) struct ClientChromePreferences {
     pub(super) collapsed_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) remote_collapsed_groups: Vec<ClientRemoteCollapsedGroups>,
+    /// Nested sidebar drawn as the compact list instead of the tree.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) space_list: bool,
 }
 
 pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {

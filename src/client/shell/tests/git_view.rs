@@ -882,6 +882,29 @@ fn agents_carry_their_folders_git_state_and_hovering_makes_it_a_git_button() {
     let back = mouse(&mut state, edge.x + 20, edge.y + 3, MouseEventKind::Moved);
     assert_eq!(back.pointer_shape, Some(""));
 
+    // The list folds the lone agent into its space's line, carrying the
+    // agent's own folder state; hovering makes it that folder's button.
+    state.space_list = true;
+    screen(&mut state);
+    let space = state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.workspace_id == "ws_1")
+        .map(|hit| hit.rect)
+        .expect("first space");
+    assert!(state.hits.agents.is_empty());
+    assert!(line(&mut state, space.y).contains("↑2 ±1"));
+    mouse(&mut state, space.x + 2, space.y + 1, MouseEventKind::Moved);
+    mouse(&mut state, space.x + 2, space.y, MouseEventKind::Moved);
+    assert!(line(&mut state, space.y).contains(" ⎇ ↑2 ±1 "));
+    assert!(state
+        .hits
+        .agent_git_buttons
+        .iter()
+        .any(|(rect, _, pane)| rect.y == space.y && pane == "pane_1"));
+    state.space_list = false;
+
     // An agent whose space is not a git folder gets no button.
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     projected.workspaces[0].branch = None;

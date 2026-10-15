@@ -2101,6 +2101,40 @@ fn every_agent_has_a_line_and_folders_without_agents_keep_their_git_state() {
         !lines.iter().any(|line| line.contains("feature/")),
         "{lines:#?}"
     );
+    assert!(
+        lines[0].starts_with(" spaces") && lines[0].trim_end().ends_with("tree"),
+        "{lines:#?}"
+    );
+
+    // The list: a folder with a lone agent folds it into its own line.
+    state.space_list = true;
+    let frame = state.compose(106, 40).expect("list frame");
+    let lines = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .take(width)
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    assert!(lines[0].trim_end().ends_with("list"), "{lines:#?}");
+    let parent = lines
+        .iter()
+        .position(|line| line.contains("client-shell"))
+        .expect("parent line");
+    assert!(
+        lines[parent].starts_with(" ○ client-shell · alpha"),
+        "{lines:#?}"
+    );
+    assert!(lines[parent + 1].starts_with("   main"), "{lines:#?}");
+    assert!(
+        lines[parent + 2].starts_with("   ├─ ● v4 · bravo"),
+        "{lines:#?}"
+    );
+    assert!(lines[parent + 3].contains("↑5 ↓50"), "{lines:#?}");
+    assert!(lines[parent + 4].contains("rebasing ±6"), "{lines:#?}");
 }
 
 #[test]
@@ -2181,9 +2215,11 @@ fn the_tree_hangs_worktrees_off_the_branch_line() {
             .position(|line| line.contains(needle))
             .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
     };
-    // The header is just the title: there is one view.
+    // The tree is the default; the header switches to the list.
     assert!(
-        lines.iter().any(|line| line.trim_end() == " spaces"),
+        lines
+            .iter()
+            .any(|line| line.starts_with(" spaces") && line.trim_end().ends_with("tree")),
         "{lines:#?}"
     );
     // Agents keep their own lines; the branch gets its own line too.

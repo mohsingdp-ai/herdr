@@ -102,6 +102,8 @@ pub(super) struct ShellHitMap {
     pub(super) agent_sort_toggle: Rect,
     /// Nested sidebar: show/hide chevrons for each space's agents.
     pub(super) space_agent_toggles: Vec<(Rect, String)>,
+    /// Nested sidebar header: switches the tree and the compact list.
+    pub(super) space_view_toggle: Rect,
     /// A space's "±N" uncommitted-changes badge, or a hovered agent's "⎇" button,
     /// which opens that space's git view.
     pub(super) space_git_badges: Vec<(Rect, String)>,
@@ -935,6 +937,8 @@ pub(crate) struct ClientShellState {
     pub(super) sidebar_section_split: f32,
     pub(super) sidebar_section_split_manual: bool,
     pub(super) agent_panel_sort_manual: bool,
+    /// Nested sidebar as the compact list instead of the default tree.
+    pub(super) space_list: bool,
     pub(super) last_sidebar_divider_click: Option<std::time::Instant>,
     pub(super) chrome_drag: Option<ClientChromeDrag>,
     pub(super) workspace_press: Option<ClientWorkspacePress>,
@@ -1118,6 +1122,7 @@ impl ClientShellState {
             sidebar_section_split,
             sidebar_section_split_manual: preferences.sidebar_section_split.is_some(),
             agent_panel_sort_manual: preferences.agent_panel_sort.is_some(),
+            space_list: preferences.space_list,
             last_sidebar_divider_click: None,
             chrome_drag: None,
             workspace_press: None,

@@ -398,7 +398,7 @@ Space rows accept these built-in tokens:
 - `state_text` — text for the rolled-up agent state.
 - `workspace` — workspace name.
 - `branch` — Git branch when available.
-- `git_status` — Git ahead and behind counts when nonzero. In the nested spaces view, each agent's line shows its folder's state: `↑N` commits not pushed (also on a branch never pushed), `↓N` to pull, `±N` uncommitted files, and `rebasing` or `merging` when one stopped midway; a space with no agent shows it on its own line. Hovering the line turns it into a `⎇` button that opens the space's git view.
+- `git_status` — Git ahead and behind counts when nonzero. In the nested spaces view, each agent's line shows its folder's state: `↑N` commits not pushed (also on a branch never pushed), `↓N` to pull, `±N` uncommitted files, and `rebasing` or `merging` when one stopped midway; a space with no agent shows it on its own line. Hovering the line turns it into a `⎇` button that opens the space's git view. The `tree`/`list` switch in the spaces header picks the layout: the tree (default) gives every agent its own line, while the list folds a folder's lone agent into the folder's line.
 - `$name` — custom workspace metadata named `name`.
 
 Tokens render in their configured order. Herdr normally separates adjacent values with ` · ` and uses a single space after `state_icon`. Missing values and their separators disappear; a row disappears when none of its tokens have a value. Existing custom rows remain unchanged, so add `machine` explicitly if you want machine identity in a custom multi-machine layout. Each layout may contain at most 16 rows, with at most 16 tokens in each row.
