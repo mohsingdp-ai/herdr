@@ -16,7 +16,7 @@ use crate::api::schema::{GitChangeKind, GitCommitInfo};
 const DIFF_GUTTER: u16 = 12;
 const COMMIT_BOX_HEIGHT: u16 = 5;
 const MIN_WIDTH: u16 = 50;
-const MIN_HEIGHT: u16 = 12;
+const MIN_HEIGHT: u16 = 13;
 /// Rows of a commit message body shown before "… more".
 const BODY_PREVIEW_ROWS: usize = 2;
 /// Rows a message (a git error can run long) may take above the hint row.
@@ -46,7 +46,8 @@ impl GitViewGeometry {
     pub(super) fn new(area: Rect, view: &ClientGitView) -> Self {
         let mut geometry = Self {
             too_small: area.width < MIN_WIDTH || area.height < MIN_HEIGHT,
-            header: Rect::new(area.x, area.y, area.width, 1),
+            // One blank row above the header keeps it off the tab bar.
+            header: Rect::new(area.x, area.y + u16::from(area.height > 1), area.width, 1),
             left: Rect::default(),
             divider_x: 0,
             right: Rect::default(),
@@ -64,7 +65,7 @@ impl GitViewGeometry {
         if geometry.too_small {
             return geometry;
         }
-        let body = Rect::new(area.x, area.y + 2, area.width, area.height - 2);
+        let body = Rect::new(area.x, area.y + 3, area.width, area.height - 3);
         let left_width = percent(area.width, 36).clamp(34, 60).min(area.width - 24);
         geometry.left = Rect::new(body.x, body.y, left_width, body.height);
         geometry.divider_x = body.x + left_width;
@@ -429,7 +430,7 @@ pub(super) fn render_git_view(
         put_text(
             buffer,
             area.x + 1,
-            area.y + 2.min(area.height.saturating_sub(1)),
+            area.y + 3.min(area.height.saturating_sub(1)),
             area.width.saturating_sub(2),
             "the window is too small for the git view",
             styles.dim,
@@ -437,7 +438,7 @@ pub(super) fn render_git_view(
         return frame;
     }
     let rule = "─".repeat(usize::from(area.width));
-    put_text(buffer, area.x, area.y + 1, area.width, &rule, styles.rule);
+    put_text(buffer, area.x, area.y + 2, area.width, &rule, styles.rule);
     for y in geometry.left.y..geometry.left.bottom() {
         put_text(buffer, geometry.divider_x, y, 1, "│", styles.rule);
     }
