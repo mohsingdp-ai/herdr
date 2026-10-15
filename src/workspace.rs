@@ -20,13 +20,16 @@ mod git;
 mod tab;
 
 use self::git::git_status_cache_key_for_space;
-pub(crate) use self::{git::git_status_snapshot_for_cwd_with_demand, tab::MovedPane};
 pub use self::{
     git::{
         derive_label_from_cwd, fallback_label_from_cwd, git_branch, git_space_metadata,
         git_status_cache_key, GitSpaceMetadata, GitStatusCacheEntry, GitStatusRefreshDemand,
     },
     tab::{NewPane, Tab},
+};
+pub(crate) use self::{
+    git::{git_operation, git_status_snapshot_for_cwd_with_demand},
+    tab::MovedPane,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -49,6 +52,8 @@ pub struct WorkspaceGitStatus {
     pub ahead_behind: Option<(usize, usize)>,
     /// Files with uncommitted changes, untracked ones included.
     pub changes: Option<usize>,
+    /// A rebase or merge stopped midway ("rebasing", "merging", …).
+    pub operation: Option<&'static str>,
     pub space: Option<GitSpaceMetadata>,
 }
 
@@ -99,6 +104,7 @@ impl WorkspaceGitStatusSnapshot {
             branch: self.branch,
             ahead_behind: self.ahead_behind,
             changes: None,
+            operation: None,
             space: self.space,
         }
     }
@@ -194,6 +200,7 @@ pub struct Workspace {
     /// Cached ahead/behind counts for the workspace repo's current branch upstream.
     pub(crate) cached_git_ahead_behind: Option<(usize, usize)>,
     pub(crate) cached_git_changes: Option<usize>,
+    pub(crate) cached_git_operation: Option<&'static str>,
     /// Cached derived Git repo metadata for worktree actions and status display.
     pub(crate) cached_git_space: Option<GitSpaceMetadata>,
     /// Explicit Herdr-managed worktree grouping provenance.
@@ -263,6 +270,7 @@ impl Workspace {
             cached_git_branch: git_branch(&identity_cwd),
             cached_git_ahead_behind: None,
             cached_git_changes: None,
+            cached_git_operation: None,
             cached_git_space,
             worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
@@ -416,6 +424,7 @@ impl Workspace {
                 cached_git_branch: git_branch(&initial_cwd),
                 cached_git_ahead_behind: None,
                 cached_git_changes: None,
+                cached_git_operation: None,
                 cached_git_space,
                 worktree_space: None,
                 metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
@@ -1086,6 +1095,10 @@ impl Workspace {
         self.cached_git_changes
     }
 
+    pub fn git_operation(&self) -> Option<&'static str> {
+        self.cached_git_operation
+    }
+
     pub fn git_space(&self) -> Option<&GitSpaceMetadata> {
         self.cached_git_space.as_ref()
     }
@@ -1210,6 +1223,7 @@ impl Workspace {
             cached_git_branch: git_branch(&identity_cwd),
             cached_git_ahead_behind: None,
             cached_git_changes: None,
+            cached_git_operation: None,
             cached_git_space: None,
             worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),

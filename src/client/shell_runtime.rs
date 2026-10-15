@@ -780,6 +780,9 @@ pub(super) fn finish_client_shell_input(
     if outcome.query_host_theme {
         query_host_terminal_theme();
     }
+    if let Some(shape) = outcome.pointer_shape {
+        let _ = crate::terminal_effects::write_pointer_shape(&mut io::stdout(), shape);
+    }
     sync_client_shell_keyboard_report_all(state)?;
     let mut actions = outcome.actions;
     let pick_folder = actions

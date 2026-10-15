@@ -109,6 +109,7 @@ fn grouped_worktrees_render_parent_branch_and_indented_child() {
         branch: Some("worktree/feature".into()),
         git_ahead_behind: None,
         git_changes: None,
+        git_operation: None,
         tokens: Vec::new(),
         worktree: Some(ClientShellWorktree {
             key: "repo".into(),
@@ -900,7 +901,6 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
     config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     // The tree view gives every agent a line of its own.
-    state.space_tree = true;
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
 
@@ -924,10 +924,13 @@ fn nested_agents_sit_under_their_space_with_branch_on_the_name_line() {
     let first = find("client-shell");
     let second = find("○ other");
     assert!(lines[first].contains("main"), "{lines:#?}");
-    assert!(lines[second].contains("dev ↑1 ↓2"), "{lines:#?}");
+    // A space's git state rides on its agents' lines, not the space's.
+    assert!(lines[second].contains("dev ⌃"), "{lines:#?}");
+    assert!(!lines[second].contains('↑'), "{lines:#?}");
     assert_eq!(find("alpha"), first + 1);
     assert_eq!(find("charlie"), first + 2);
     assert_eq!(find("bravo"), second + 1);
+    assert!(lines[second + 1].contains("↑1 ↓2"), "{lines:#?}");
     assert!(
         !lines.iter().any(|line| line.contains(" agents")),
         "{lines:#?}"
@@ -1990,7 +1993,7 @@ fn agent_row_right_click_menu_copies_pane_id() {
 }
 
 #[test]
-fn list_view_is_a_compact_tree_with_lone_agents_on_their_space_line() {
+fn every_agent_has_a_line_and_folders_without_agents_keep_their_git_state() {
     let mut projected = snapshot();
     projected.workspaces[0].worktree = Some(ClientShellWorktree {
         key: "repo".into(),
@@ -2016,6 +2019,14 @@ fn list_view_is_a_compact_tree_with_lone_agents_on_their_space_line() {
     child.branch = Some("feature/ui-polish-with-a-long-name".into());
     child.git_ahead_behind = Some((5, 50));
     child.agent_status = AgentStatus::Idle;
+    projected.workspaces.push(child.clone());
+    // Mid-rebase there is no branch, yet the folder is still in git.
+    child.workspace_id = "ws_4".into();
+    child.label = "rebased".into();
+    child.branch = None;
+    child.git_ahead_behind = None;
+    child.git_changes = Some(6);
+    child.git_operation = Some("rebasing".into());
     projected.workspaces.push(child);
     let agent = |pane_id: &str, workspace_id: &str, name: &str| ClientShellAgent {
         pane_id: pane_id.into(),
@@ -2064,36 +2075,36 @@ fn list_view_is_a_compact_tree_with_lone_agents_on_their_space_line() {
             .position(|line| line.contains(needle))
             .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
     };
-    // A lone agent rides on its space's line; the branch gets its own line.
+    // A lone agent gets its own line too; the branch keeps its line.
     let parent = find("client-shell");
-    assert!(
-        lines[parent].starts_with(" ○ client-shell · alpha"),
+    assert_eq!(
+        lines[parent].trim_end(),
+        " ○ client-shell        ⌃",
         "{lines:#?}"
     );
-    assert!(lines[parent + 1].starts_with("   main"), "{lines:#?}");
-    // One line per worktree, icon only; the branch named "v4" is not repeated.
+    assert!(lines[parent + 1].starts_with(" │ alpha"), "{lines:#?}");
+    assert!(lines[parent + 2].starts_with("   main"), "{lines:#?}");
+    // The branch named "v4" is not repeated; its agent hangs under it.
+    assert!(lines[parent + 3].starts_with("   ├─ ● v4"), "{lines:#?}");
+    assert!(lines[parent + 4].starts_with("   │  │ bravo"), "{lines:#?}");
+    // No agent: the folder line keeps its git state, dropping a long branch.
     assert!(
-        lines[parent + 2].starts_with("   ├─ ● v4 · bravo"),
+        lines[parent + 5].starts_with("   ├─ ○ ui-poli"),
         "{lines:#?}"
     );
-    // A branch that would squeeze the name is dropped; its arrows stay.
+    assert!(lines[parent + 5].contains("↑5 ↓50"), "{lines:#?}");
     assert!(
-        lines[parent + 3].starts_with("   └─ ○ ui-poli"),
+        lines[parent + 6].starts_with("   └─ ○ re") && lines[parent + 6].contains("rebasing ±6"),
         "{lines:#?}"
     );
-    assert!(lines[parent + 3].contains("↑5 ↓50"), "{lines:#?}");
-    for line in &lines {
-        assert!(
-            !line.contains("feature/") && !line.contains("blocked"),
-            "{lines:#?}"
-        );
-        // Nothing to fold: no space has two agents.
-        assert!(!line.contains('⌃') && !line.contains('⎇'), "{lines:#?}");
-    }
+    assert!(
+        !lines.iter().any(|line| line.contains("feature/")),
+        "{lines:#?}"
+    );
 }
 
 #[test]
-fn tree_view_hangs_worktrees_off_the_branch_line_with_icon_only_status() {
+fn the_tree_hangs_worktrees_off_the_branch_line() {
     let mut projected = snapshot();
     projected.workspaces[0].label = "repo".into();
     projected.workspaces[0].worktree = Some(ClientShellWorktree {
@@ -2149,7 +2160,6 @@ fn tree_view_hangs_worktrees_off_the_branch_line_with_icon_only_status() {
         crate::config::AgentSidebarToken::StateText,
     ]];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
-    state.space_tree = true;
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
 
@@ -2171,15 +2181,9 @@ fn tree_view_hangs_worktrees_off_the_branch_line_with_icon_only_status() {
             .position(|line| line.contains(needle))
             .unwrap_or_else(|| panic!("{needle} missing: {lines:#?}"))
     };
-    // The header keeps only the list/tree switch.
+    // The header is just the title: there is one view.
     assert!(
-        lines
-            .iter()
-            .any(|line| line.starts_with(" spaces") && line.trim_end().ends_with("tree")),
-        "{lines:#?}"
-    );
-    assert!(
-        !lines.iter().any(|line| line.contains("grouped")),
+        lines.iter().any(|line| line.trim_end() == " spaces"),
         "{lines:#?}"
     );
     // Agents keep their own lines; the branch gets its own line too.
@@ -2200,12 +2204,10 @@ fn tree_view_hangs_worktrees_off_the_branch_line_with_icon_only_status() {
         "{lines:#?}"
     );
     assert!(lines[parent + 6].starts_with("   └─ ○ notes"), "{lines:#?}");
-    // Icon only: no status words, no ⎇ marks, no blank lines in the group.
+    // State words show while they fit; ⎇ only on hover.
+    assert!(lines[parent + 1].contains("○ idle"), "{lines:#?}");
+    assert!(lines[parent + 4].contains("● blocked"), "{lines:#?}");
     for line in &lines[parent..=parent + 6] {
-        assert!(
-            !line.contains("blocked") && !line.contains("idle"),
-            "{lines:#?}"
-        );
         assert!(!line.contains('⎇'), "{lines:#?}");
     }
 

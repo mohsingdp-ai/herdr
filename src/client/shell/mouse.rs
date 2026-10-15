@@ -21,6 +21,49 @@ impl ClientShellState {
         }
     }
 
+    /// The mouse pointer for `point`: resize arrows over a draggable edge and
+    /// while dragging one, a hand over git buttons, else the terminal's own.
+    fn pointer_shape_at(&self, point: (u16, u16)) -> &'static str {
+        let split = |direction| match direction {
+            crate::protocol::PaneSurfaceSplitDirection::Horizontal => "col-resize",
+            crate::protocol::PaneSurfaceSplitDirection::Vertical => "row-resize",
+        };
+        match &self.chrome_drag {
+            Some(ClientChromeDrag::SidebarWidth) => return "col-resize",
+            Some(ClientChromeDrag::SidebarSection) => return "row-resize",
+            Some(ClientChromeDrag::PaneSplit { hit, .. }) => return split(hit.direction),
+            Some(_) => return "",
+            None => {}
+        }
+        if !self.config.mouse_capture || self.overlay.is_some() {
+            return "";
+        }
+        let over = |rect: Rect| super::contains(rect, point);
+        if over(self.hits.sidebar_divider) {
+            "col-resize"
+        } else if over(self.hits.sidebar_section_divider) {
+            "row-resize"
+        } else if let Some(hit) = self.hits.pane_splits.iter().find(|hit| over(hit.hit_rect)) {
+            split(hit.direction)
+        } else if self
+            .hits
+            .space_git_badges
+            .iter()
+            .any(|(rect, _)| over(*rect))
+            || self.hits.git_view.targets.iter().any(|(rect, target)| {
+                over(*rect)
+                    && matches!(
+                        target,
+                        super::git_view::GitViewTarget::Push | super::git_view::GitViewTarget::Pull
+                    )
+            })
+        {
+            "pointer"
+        } else {
+            ""
+        }
+    }
+
     fn set_sidebar_section_from_row(&mut self, row: u16, outcome: &mut ClientShellInput) {
         let divider = self.hits.sidebar_divider;
         if divider.height == 0 {
@@ -683,6 +726,31 @@ impl ClientShellState {
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
         self.update_link_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
+        // Hover follows the pointer's motion; a scroll alone leaves it be.
+        if mouse.kind == MouseEventKind::Moved {
+            let hover = self
+                .hits
+                .agents
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .map(|(_, pane_id)| SidebarHover::Agent(pane_id.clone()))
+                .or_else(|| {
+                    self.hits
+                        .workspaces
+                        .iter()
+                        .find(|hit| super::contains(hit.rect, point))
+                        .map(|hit| SidebarHover::Space(hit.workspace_id.clone()))
+                });
+            if hover != self.sidebar_hover {
+                self.sidebar_hover = hover;
+                outcome.repaint = true;
+            }
+        }
+        let shape = self.pointer_shape_at(point);
+        if shape != self.pointer_shape {
+            self.pointer_shape = shape;
+            outcome.pointer_shape = Some(shape);
+        }
         if self.mode == ClientShellMode::Navigate
             && self.workspace_preview_action_blocked()
             && self.overlay.is_none()
@@ -2076,12 +2144,6 @@ impl ClientShellState {
                     }
                     return;
                 }
-                if super::contains(self.hits.space_view_toggle, point) {
-                    self.space_tree = !self.space_tree;
-                    self.persist_chrome_preferences(outcome);
-                    outcome.repaint = true;
-                    return;
-                }
                 if super::contains(self.hits.agent_sort_toggle, point) {
                     let sort = match self.config.agent_panel_sort {
                         crate::config::AgentPanelSortConfig::Spaces => {
@@ -2252,6 +2314,8 @@ impl ClientShellState {
                         return;
                     }
                     self.last_agent_click = Some((pane_id.clone(), now));
+                    // Choosing an agent means its terminal, not the git view over it.
+                    self.close_git_view(outcome);
                     self.push_endpoint_method(
                         crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
                             pane_id,

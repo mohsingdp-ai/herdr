@@ -424,6 +424,7 @@ fn restore_workspace(
             cached_git_branch: None,
             cached_git_ahead_behind: None,
             cached_git_changes: None,
+            cached_git_operation: None,
             cached_git_space: None,
             worktree_space: snap.worktree_space.clone(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),

@@ -237,46 +237,14 @@ pub(crate) fn render_sidebar(
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
-    if nested && workspace_area.height > 0 {
-        // Switches the compact list and the expanded tree.
-        let view = if state.space_tree { "tree" } else { "list" };
-        let view_width = display_width(view).min(workspace_area.width);
-        let view_rect = Rect::new(
-            workspace_area.right().saturating_sub(view_width),
-            workspace_area.y,
-            view_width,
-            1,
-        );
-        if config.mouse_capture {
-            hits.space_view_toggle = view_rect;
-        }
-        put_text(
-            buffer,
-            view_rect.x,
-            view_rect.y,
-            view_rect.width,
-            view,
-            Style::default()
-                .fg(palette.overlay0)
-                .add_modifier(Modifier::BOLD),
-        );
-    }
     // Nested spaces draw as a branch tree: worktrees hang off their repo's
-    // branch line and status is the icon alone. The list keeps it compact (a
-    // lone agent rides on its space's line); the tree gives every agent a line
-    // and lets the repo's ⌃ fold the whole group.
-    let compact = nested && !state.space_tree;
-    let mut agents = if nested {
+    // branch line, every agent gets a line of its own carrying its folder's
+    // git state, and the repo's ⌃ folds the whole group.
+    let agents = if nested {
         crate::client::shell::agent_sidebar::agent_rows(snapshot, config, None)
     } else {
         Vec::new()
     };
-    if nested {
-        for row in agents.iter_mut().flat_map(|agent| agent.rows.iter_mut()) {
-            row.retain(|token| !matches!(token.kind, crate::ui::ResolvedTokenKind::StateText(_)));
-        }
-    }
-    let agents = agents;
     // ponytail: keyed by workspace id, so a folded space can reopen folded
     // under a reused id after restart; key by something stabler if that bites.
     let agents_key =
@@ -287,18 +255,7 @@ pub(crate) fn render_sidebar(
             .filter(|agent| agent.workspace_id == workspace.workspace_id)
             .count()
     };
-    let inline_agent = |workspace: &ClientShellWorkspace| {
-        (compact && agent_count(workspace) == 1)
-            .then(|| {
-                agents
-                    .iter()
-                    .find(|agent| agent.workspace_id == workspace.workspace_id)
-            })
-            .flatten()
-    };
-    // Only agents with lines of their own can be folded away.
-    let has_agents =
-        |workspace: &ClientShellWorkspace| agent_count(workspace) > usize::from(compact);
+    let has_agents = |workspace: &ClientShellWorkspace| agent_count(workspace) > 0;
     // A repo checkout folds with its worktree group.
     let tree_group_folded = |workspace: &ClientShellWorkspace| {
         nested
@@ -314,7 +271,6 @@ pub(crate) fn render_sidebar(
             .filter(|agent| agent.workspace_id == workspace.workspace_id)
             .filter(|_| indented || !state.collapsed_groups.contains(&agents_key(workspace)))
             .filter(|_| !tree_group_folded(workspace))
-            .filter(|_| inline_agent(workspace).is_none())
             .collect::<Vec<_>>()
     };
     let agent_height =
@@ -444,12 +400,9 @@ pub(crate) fn render_sidebar(
         // Nested: the branch sits at the right end of the name line, then the
         // show/hide-agents chevron, then any group toggle. Worktree children
         // already show their branch as the name.
-        // Nested, the repo's ⌃ folds its whole group instead: always in the
-        // tree, and in the list only once folded, so it can be unfolded.
+        // Nested, the repo's ⌃ folds its whole group instead.
         let group_key = parent_group_key(snapshot, entry.index).filter(|_| !entry.indented);
-        let tree_group_key = group_key
-            .clone()
-            .filter(|key| nested && (!compact || state.collapsed_groups.contains(key)));
+        let tree_group_key = group_key.clone().filter(|_| nested);
         let show_group_toggle = group_key.is_some() && !nested;
         let mut right = rect
             .right()
@@ -485,11 +438,18 @@ pub(crate) fn render_sidebar(
             (toggle, key)
         });
         let has_tree_children = branch_line(entry_position);
-        let branch = workspace
-            .branch
-            .as_deref()
-            .filter(|_| nested && rect.height > 0 && !has_tree_children);
-        let mut right_segments = branch.map(|branch| {
+        // A folder's git state rides on its agents' lines; with none showing it
+        // stays here, where hovering turns it into the ⎇ button.
+        let shows_agents = !space_agents(workspace, entry.indented).is_empty();
+        let git_button = !shows_agents
+            && state.hovered_space == Some(workspace.workspace_id.as_str())
+            && is_git_folder(workspace);
+        let mut right_segments = (nested
+            && rect.height > 0
+            && !has_tree_children
+            && is_git_folder(workspace))
+        .then(|| {
+            let branch = workspace.branch.as_deref().unwrap_or_default();
             // A grouped worktree is usually named after its branch; say it once.
             let branch = if entry.indented && (!workspace.custom_label || workspace.label == branch)
             {
@@ -497,35 +457,24 @@ pub(crate) fn render_sidebar(
             } else {
                 branch
             };
-            // Ahead/behind arrows follow the branch, as on the dropped git row.
-            let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
-            vec![
-                (
-                    branch.to_string(),
-                    if workspace.focused {
-                        palette.mauve
-                    } else {
-                        palette.overlay0
-                    },
-                ),
-                (
-                    if ahead > 0 {
-                        format!(" ↑{ahead}")
-                    } else {
-                        String::new()
-                    },
-                    palette.green,
-                ),
-                (
-                    if behind > 0 {
-                        format!(" ↓{behind}")
-                    } else {
-                        String::new()
-                    },
-                    palette.red,
-                ),
-                (git_changes_badge(workspace), palette.yellow),
-            ]
+            let mut segments = vec![(
+                branch.to_string(),
+                if workspace.focused {
+                    palette.mauve
+                } else {
+                    palette.overlay0
+                },
+            )];
+            if git_button {
+                segments.push((" ⎇".to_owned(), palette.text));
+            }
+            if !shows_agents {
+                segments.extend(git_status_segments(workspace, palette));
+            }
+            if git_button {
+                segments.push((" ".to_owned(), palette.text));
+            }
+            segments
         });
         let segments_width = |segments: &[(String, ratatui::style::Color)]| {
             segments.iter().fold(0u16, |width, (text, _)| {
@@ -553,12 +502,6 @@ pub(crate) fn render_sidebar(
                 width.saturating_add(display_width(&span.content))
             })
         });
-        let space_label = rows.first().and_then(|row| {
-            row.iter().find_map(|token| match &token.kind {
-                crate::ui::ResolvedTokenKind::Workspace(text) => Some(text.clone()),
-                _ => None,
-            })
-        });
         // The name and dot come first: a branch that would squeeze them is
         // dropped, leaving only its ahead/behind arrows.
         if let Some(segments) = right_segments
@@ -578,23 +521,32 @@ pub(crate) fn render_sidebar(
             right_segments.filter(|segments| segments.iter().any(|(text, _)| !text.is_empty()));
         let name_rect = right_segments.as_ref().map_or(rect, |segments| {
             let x = right.saturating_sub(segments_width(segments)).max(rect.x);
-            segments.iter().fold(x, |cursor, (text, color)| {
-                let end = put_segment(
-                    buffer,
-                    cursor,
-                    rect.y,
-                    right,
-                    text,
-                    Style::default().fg(*color),
-                );
-                if text.starts_with(GIT_CHANGES_PREFIX) && end > cursor && config.mouse_capture {
+            let mut cursor = x;
+            for (index, (text, color)) in segments.iter().enumerate() {
+                let mut style = Style::default().fg(*color);
+                if git_button && index > 0 {
+                    style = style.bg(palette.surface1);
+                }
+                let end = put_segment(buffer, cursor, rect.y, right, text, style);
+                if !git_button
+                    && text.starts_with(GIT_CHANGES_PREFIX)
+                    && end > cursor
+                    && config.mouse_capture
+                {
                     hits.space_git_badges.push((
                         Rect::new(cursor, rect.y, end - cursor, 1),
                         workspace.workspace_id.clone(),
                     ));
                 }
-                end
-            });
+                cursor = end;
+            }
+            let button_x = x.saturating_add(display_width(&segments[0].0));
+            if git_button && cursor > button_x && config.mouse_capture {
+                hits.space_git_badges.push((
+                    Rect::new(button_x, rect.y, cursor - button_x, 1),
+                    workspace.workspace_id.clone(),
+                ));
+            }
             // render_workspace_rows stops 2 columns short of its area: 1 column gap.
             Rect::new(rect.x, rect.y, (x + 1).saturating_sub(rect.x), rect.height)
         });
@@ -623,45 +575,6 @@ pub(crate) fn render_sidebar(
             dragged,
             palette,
         );
-        if let Some(agent) = inline_agent(workspace) {
-            if agent.focused {
-                buffer.set_style(
-                    Rect::new(body.x, rect.y, content_width, 1),
-                    Style::default().bg(palette.surface0),
-                );
-            }
-            // Its name follows the space's, unless they match or it won't fit whole.
-            let name = agent
-                .rows
-                .iter()
-                .flatten()
-                .find_map(|token| match &token.kind {
-                    crate::ui::ResolvedTokenKind::Agent(text) => Some(text.as_str()),
-                    _ => None,
-                });
-            if let Some(name) = name.filter(|name| space_label.as_deref() != Some(*name)) {
-                let x = rect.x.saturating_add(lead).saturating_add(name_width);
-                let end = name_rect.right().saturating_sub(2);
-                if x.saturating_add(3).saturating_add(display_width(name)) <= end {
-                    let x = put_segment(
-                        buffer,
-                        x,
-                        rect.y,
-                        end,
-                        " · ",
-                        Style::default().fg(palette.overlay0),
-                    );
-                    put_segment(
-                        buffer,
-                        x,
-                        rect.y,
-                        end,
-                        name,
-                        Style::default().fg(palette.subtext0),
-                    );
-                }
-            }
-        }
         // The space's agents, indented under it; they scroll with it.
         let mut agent_y = rect.bottom();
         // A dim guide runs down under the space's status dot (or a tree
@@ -679,10 +592,34 @@ pub(crate) fn render_sidebar(
                 content_width.saturating_sub(indent),
                 height,
             );
+            let hovered = state.hovered_agent == Some(agent.pane_id.as_str());
+            let is_git = is_git_folder(workspace);
+            let status = if is_git {
+                git_status_segments(workspace, palette)
+            } else {
+                Vec::new()
+            };
+            // The folder's git state sits at the right end; the agent line yields the room.
+            let status_width = git_status_width(&status, hovered && is_git);
+            let end = agent_rect.right().saturating_sub(1);
+            let status_x = if status_width == 0 {
+                agent_rect.right()
+            } else {
+                end.saturating_sub(status_width)
+                    .max(agent_rect.x.saturating_add(4).min(end))
+            };
             crate::client::shell::agent_sidebar::render_agent_row(
-                buffer, agent_rect, agent, config,
+                buffer,
+                Rect::new(
+                    agent_rect.x,
+                    agent_y,
+                    status_x.saturating_sub(agent_rect.x),
+                    height,
+                ),
+                agent,
+                config,
             );
-            if agent.focused {
+            if agent.focused || hovered {
                 // Themes may set active_row_bg to the sidebar colour, so the
                 // focused agent gets a surface bar across the whole row.
                 buffer.set_style(
@@ -690,6 +627,15 @@ pub(crate) fn render_sidebar(
                     Style::default().bg(palette.surface0),
                 );
             }
+            render_git_status(
+                buffer,
+                Rect::new(status_x, agent_y, end.saturating_sub(status_x), 1),
+                &status,
+                hovered && is_git,
+                &workspace.workspace_id,
+                config,
+                hits,
+            );
             for row in agent_y..agent_y.saturating_add(height) {
                 put_text(
                     buffer,
@@ -716,7 +662,6 @@ pub(crate) fn render_sidebar(
         }
         if has_tree_children {
             if agent_y < body.bottom() {
-                let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
                 let line_end = rect.right();
                 let mut x = body.x.saturating_add(3);
                 x = put_segment(
@@ -731,41 +676,24 @@ pub(crate) fn render_sidebar(
                         palette.overlay0
                     }),
                 );
-                if ahead > 0 {
-                    x = put_segment(
-                        buffer,
-                        x,
-                        agent_y,
-                        line_end,
-                        &format!(" ↑{ahead}"),
-                        Style::default().fg(palette.green),
-                    );
-                }
-                if behind > 0 {
-                    x = put_segment(
-                        buffer,
-                        x,
-                        agent_y,
-                        line_end,
-                        &format!(" ↓{behind}"),
-                        Style::default().fg(palette.red),
-                    );
-                }
-                let badge = git_changes_badge(workspace);
-                if !badge.is_empty() {
-                    let end = put_segment(
-                        buffer,
-                        x,
-                        agent_y,
-                        line_end,
-                        &badge,
-                        Style::default().fg(palette.yellow),
-                    );
-                    if end > x && config.mouse_capture {
-                        hits.space_git_badges.push((
-                            Rect::new(x, agent_y, end - x, 1),
-                            workspace.workspace_id.clone(),
-                        ));
+                if !shows_agents {
+                    for (text, color) in git_status_segments(workspace, palette) {
+                        let from = x;
+                        x = put_segment(
+                            buffer,
+                            x,
+                            agent_y,
+                            line_end,
+                            &text,
+                            Style::default().fg(color),
+                        );
+                        if text.starts_with(GIT_CHANGES_PREFIX) && x > from && config.mouse_capture
+                        {
+                            hits.space_git_badges.push((
+                                Rect::new(from, agent_y, x - from, 1),
+                                workspace.workspace_id.clone(),
+                            ));
+                        }
                     }
                 }
             }
@@ -889,6 +817,7 @@ pub(crate) fn render_sidebar(
             snapshot,
             config,
             state.agent_scroll,
+            state.hovered_agent,
             hits,
         );
     }
@@ -1248,5 +1177,91 @@ fn git_changes_badge(workspace: &ClientShellWorkspace) -> String {
     match workspace.git_changes {
         Some(count) if count > 0 => format!("{GIT_CHANGES_PREFIX}{count}"),
         _ => String::new(),
+    }
+}
+
+/// Whether the space's folder is in a git repository, even mid-rebase with no branch.
+pub(in crate::client::shell) fn is_git_folder(workspace: &ClientShellWorkspace) -> bool {
+    workspace.branch.is_some()
+        || workspace.git_changes.is_some()
+        || workspace.git_operation.is_some()
+}
+
+/// " rebasing", " ↑1", " ↓48", " ±2": the folder's git state, zeros left out.
+fn git_status_segments(
+    workspace: &ClientShellWorkspace,
+    palette: &Palette,
+) -> Vec<(String, ratatui::style::Color)> {
+    let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
+    let mut segments = Vec::new();
+    if let Some(operation) = workspace.git_operation.as_deref() {
+        segments.push((format!(" {operation}"), palette.overlay1));
+    }
+    if ahead > 0 {
+        segments.push((format!(" ↑{ahead}"), palette.green));
+    }
+    if behind > 0 {
+        segments.push((format!(" ↓{behind}"), palette.red));
+    }
+    let changes = git_changes_badge(workspace);
+    if !changes.is_empty() {
+        segments.push((changes, palette.yellow));
+    }
+    segments
+}
+
+/// Columns `render_git_status` takes: the segments, plus " ⎇" and a trailing
+/// space as a button.
+fn git_status_width(segments: &[(String, ratatui::style::Color)], button: bool) -> u16 {
+    segments
+        .iter()
+        .fold(if button { 3 } else { 0 }, |width: u16, (text, _)| {
+            width.saturating_add(display_width(text))
+        })
+}
+
+/// Draws a folder's git state in `area`, or, as a button, " ⎇ ↑1 ±2 " that
+/// opens the space's git view. Its "±N" badge alone opens it otherwise.
+pub(in crate::client::shell) fn render_git_status(
+    buffer: &mut Buffer,
+    area: Rect,
+    segments: &[(String, ratatui::style::Color)],
+    button: bool,
+    workspace_id: &str,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
+    let end = area.right();
+    let style = |color: ratatui::style::Color| {
+        let style = Style::default().fg(color);
+        if button {
+            style.bg(palette.surface1)
+        } else {
+            style
+        }
+    };
+    let mut x = area.x;
+    if button {
+        x = put_segment(buffer, x, area.y, end, " ⎇", style(palette.text));
+    }
+    for (text, color) in segments {
+        let from = x;
+        x = put_segment(buffer, x, area.y, end, text, style(*color));
+        if !button && text.starts_with(GIT_CHANGES_PREFIX) && x > from && config.mouse_capture {
+            hits.space_git_badges.push((
+                Rect::new(from, area.y, x - from, 1),
+                workspace_id.to_owned(),
+            ));
+        }
+    }
+    if button {
+        x = put_segment(buffer, x, area.y, end, " ", style(palette.text));
+        if x > area.x && config.mouse_capture {
+            hits.space_git_badges.push((
+                Rect::new(area.x, area.y, x - area.x, 1),
+                workspace_id.to_owned(),
+            ));
+        }
     }
 }

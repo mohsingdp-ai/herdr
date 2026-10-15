@@ -1211,6 +1211,7 @@ mod tests {
                 branch: Some("render-dirty-test".into()),
                 ahead_behind: Some((1, 0)),
                 changes: None,
+                operation: None,
                 space: None,
             }],
             cache_updates: Vec::new(),

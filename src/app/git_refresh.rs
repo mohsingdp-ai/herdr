@@ -271,6 +271,10 @@ fn refresh_workspace_git_statuses_with_cache_and_demand(
         let changes = (demand.ahead_behind && snapshot.space.is_some())
             .then(|| crate::source_control::recent_changed_file_count(&job.cache_key))
             .flatten();
+        // Read every refresh: starting a merge leaves HEAD, and so the cache, unchanged.
+        let operation = (demand.ahead_behind && snapshot.space.is_some())
+            .then(|| crate::workspace::git_operation(&job.cache_key))
+            .flatten();
         results.extend(job.targets.into_iter().map(move |target| {
             let mut status = snapshot.clone().into_workspace_status(
                 target.workspace_id,
@@ -279,6 +283,7 @@ fn refresh_workspace_git_statuses_with_cache_and_demand(
                 demand,
             );
             status.changes = changes;
+            status.operation = operation;
             status
         }));
     }

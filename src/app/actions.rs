@@ -1385,6 +1385,10 @@ impl AppState {
                 ws.cached_git_changes = result.changes;
                 changed = true;
             }
+            if result.demand.ahead_behind && ws.cached_git_operation != result.operation {
+                ws.cached_git_operation = result.operation;
+                changed = true;
+            }
             if ws.cached_git_space != result.space {
                 ws.cached_git_space = result.space;
                 changed = true;
@@ -2590,6 +2594,7 @@ mod tests {
                 branch: Some("main".into()),
                 ahead_behind: Some((2, 1)),
                 changes: None,
+                operation: None,
                 space: None,
             }],
         );
@@ -2660,6 +2665,7 @@ mod tests {
                 branch: Some("main".into()),
                 ahead_behind: Some((0, 1)),
                 changes: None,
+                operation: None,
                 space: None,
             }],
         );
@@ -2692,6 +2698,7 @@ mod tests {
                 branch: Some("new".into()),
                 ahead_behind: None,
                 changes: None,
+                operation: None,
                 space: None,
             }],
         );
@@ -2720,6 +2727,7 @@ mod tests {
                 branch: None,
                 ahead_behind: None,
                 changes: None,
+                operation: None,
                 space: None,
             }],
         );
@@ -2749,6 +2757,7 @@ mod tests {
                 branch: Some("scratch".into()),
                 ahead_behind: None,
                 changes: None,
+                operation: None,
                 space: Some(crate::workspace::GitSpaceMetadata {
                     key: "other-repo-key".into(),
                     checkout_key: "/other/checkout".into(),

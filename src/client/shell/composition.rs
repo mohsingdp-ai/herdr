@@ -60,7 +60,6 @@ impl ClientShellState {
             active_endpoint_id: &self.active_endpoint_id,
             collapsed_endpoints: &self.collapsed_endpoints,
             collapsed_groups: &self.collapsed_groups,
-            space_tree: self.space_tree,
             remote_collapsed_groups: &self.remote_collapsed_groups,
             workspace_scroll: &mut self.workspace_scroll,
             agent_scroll: &mut self.agent_scroll,
@@ -78,6 +77,8 @@ impl ClientShellState {
             reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
             dragged_workspace_id: None,
             workspace_drop_indicator_row: None,
+            hovered_agent: SidebarHover::agent(&self.sidebar_hover),
+            hovered_space: SidebarHover::space(&self.sidebar_hover),
         };
         if let Some(snapshot) = local_snapshot {
             render::render_sidebar(
@@ -217,7 +218,6 @@ impl ClientShellState {
                 active_endpoint_id: &self.active_endpoint_id,
                 collapsed_endpoints: &self.collapsed_endpoints,
                 collapsed_groups: &self.collapsed_groups,
-                space_tree: self.space_tree,
                 remote_collapsed_groups: &self.remote_collapsed_groups,
                 workspace_scroll: &mut self.workspace_scroll,
                 agent_scroll: &mut self.agent_scroll,
@@ -235,6 +235,8 @@ impl ClientShellState {
                 reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
+                hovered_agent: SidebarHover::agent(&self.sidebar_hover),
+                hovered_space: SidebarHover::space(&self.sidebar_hover),
             },
         );
         let git_space_label = self.git_view.as_ref().map(|view| {

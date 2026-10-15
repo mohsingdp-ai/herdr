@@ -64,6 +64,7 @@ pub(super) fn render_agent_panel(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    hovered_agent: Option<&str>,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -105,6 +106,25 @@ pub(super) fn render_agent_panel(
             render_panel_row(buffer, rect, row, grouped, config, |buffer, inner, row| {
                 hits.agents.push((rect, row.pane_id.clone()));
                 render_agent_row(buffer, inner, row, config);
+                let in_repo = snapshot.workspaces.iter().any(|workspace| {
+                    workspace.workspace_id == row.workspace_id
+                        && super::sidebar::is_git_folder(workspace)
+                });
+                if hovered_agent == Some(row.pane_id.as_str()) {
+                    buffer.set_style(rect, Style::default().bg(config.palette.surface0));
+                    if in_repo && rect.width >= 8 {
+                        let button = Rect::new(rect.right().saturating_sub(4), rect.y, 3, 1);
+                        super::sidebar::render_git_status(
+                            buffer,
+                            button,
+                            &[],
+                            true,
+                            &row.workspace_id,
+                            config,
+                            hits,
+                        );
+                    }
+                }
             })
         },
     );
@@ -484,17 +504,42 @@ pub(super) fn render_agent_row(
     };
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
         let indent = if index == 0 { 1 } else { 3 };
+        let width = rect.width.saturating_sub(indent as u16) as usize;
+        let spans_at = |tokens: &[crate::ui::ResolvedToken], width: usize| {
+            crate::ui::resolved_token_spans(
+                tokens,
+                icon,
+                status_style,
+                name_style,
+                secondary,
+                secondary,
+                palette,
+                width,
+            )
+        };
+        let is_state_text = |token: &crate::ui::ResolvedToken| {
+            matches!(token.kind, crate::ui::ResolvedTokenKind::StateText(_))
+        };
+        // The state text gives way before the name is shortened.
+        let natural = |tokens: &[crate::ui::ResolvedToken]| {
+            spans_at(tokens, usize::MAX)
+                .iter()
+                .map(|span| display_width(&span.content))
+                .sum::<usize>()
+        };
+        let fitted: Vec<_>;
+        let tokens = if tokens.iter().any(is_state_text) && natural(tokens) > width {
+            fitted = tokens
+                .iter()
+                .filter(|token| !is_state_text(token))
+                .cloned()
+                .collect();
+            &fitted
+        } else {
+            tokens
+        };
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
-        spans.extend(crate::ui::resolved_token_spans(
-            tokens,
-            icon,
-            status_style,
-            name_style,
-            secondary,
-            secondary,
-            palette,
-            rect.width.saturating_sub(indent as u16) as usize,
-        ));
+        spans.extend(spans_at(tokens, width));
         Paragraph::new(Line::from(spans)).style(row_style).render(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
             buffer,

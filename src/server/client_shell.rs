@@ -87,6 +87,7 @@ pub(super) fn snapshot_with_completions(
                 branch: state.branch(),
                 git_ahead_behind: state.git_ahead_behind(),
                 git_changes: state.git_changes(),
+                git_operation: state.git_operation().map(str::to_owned),
                 tokens,
                 worktree: workspace
                     .worktree

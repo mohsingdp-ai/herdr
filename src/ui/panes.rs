@@ -890,7 +890,7 @@ fn selection_fg_for_bg(bg: Color, p: &Palette) -> Color {
         .unwrap_or_else(|| panel_contrast_fg(p))
 }
 
-fn mix_rgb(base: Rgb, target: Rgb, amount: f32) -> Rgb {
+pub(crate) fn mix_rgb(base: Rgb, target: Rgb, amount: f32) -> Rgb {
     fn channel(base: u8, target: u8, amount: f32) -> u8 {
         (f32::from(base) + (f32::from(target) - f32::from(base)) * amount).round() as u8
     }

@@ -21,6 +21,8 @@ const MIN_HEIGHT: u16 = 12;
 const BODY_PREVIEW_ROWS: usize = 2;
 /// Rows a message (a git error can run long) may take above the hint row.
 const MAX_MESSAGE_ROWS: usize = 4;
+/// History list rows per commit: subject, author line, separator.
+const COMMIT_ROWS: usize = 3;
 
 pub(super) struct GitViewGeometry {
     pub(super) too_small: bool,
@@ -170,8 +172,9 @@ pub(super) fn list_rows(view: &ClientGitView) -> (usize, Option<(usize, usize)>)
             view.selected_file_index().map(|index| (index, 1)),
         ),
         GitViewTab::History => (
-            view.commit_list().len() * 2 + usize::from(view.has_more),
-            view.selected_commit_index().map(|index| (index * 2, 2)),
+            view.commit_list().len() * COMMIT_ROWS + usize::from(view.has_more),
+            view.selected_commit_index()
+                .map(|index| (index * COMMIT_ROWS, 2)),
         ),
     }
 }
@@ -325,6 +328,12 @@ struct Styles {
     red: Style,
     yellow: Style,
     mauve: Style,
+    /// History rows: the selected commit, a commit not pushed anywhere, and its ↑ box.
+    row_selected: Style,
+    unpushed_row: Style,
+    pill: Style,
+    /// Author initials badges, picked by a hash of the name.
+    chips: [Style; 5],
 }
 
 impl Styles {
@@ -352,6 +361,21 @@ impl Styles {
             red: Style::default().fg(p.red),
             yellow: Style::default().fg(p.yellow),
             mauve: Style::default().fg(p.mauve),
+            row_selected: base.bg(p.surface0),
+            unpushed_row: match (p.surface_dim, p.green) {
+                (Color::Rgb(r, g, b), Color::Rgb(gr, gg, gb)) => {
+                    let (r, g, b) = crate::ui::mix_rgb((r, g, b), (gr, gg, gb), 0.12);
+                    base.bg(Color::Rgb(r, g, b))
+                }
+                _ => base,
+            },
+            pill: base.bg(p.surface1),
+            chips: [p.mauve, p.teal, p.peach, p.blue, p.yellow].map(|color| {
+                Style::default()
+                    .fg(contrast)
+                    .bg(color)
+                    .add_modifier(Modifier::BOLD)
+            }),
         }
     }
 
@@ -924,6 +948,22 @@ fn short_ago(seconds: u64) -> String {
     }
 }
 
+/// "Ada Lovelace" → "AL", "tidy-dev" → "TD", "github-actions[bot]" → "GA".
+fn author_initials(author: &str) -> String {
+    let name = author.split('[').next().unwrap_or(author);
+    let initials: String = name
+        .split(|c: char| c.is_whitespace() || c == '-' || c == '_' || c == '.')
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .flat_map(char::to_uppercase)
+        .collect();
+    if initials.is_empty() {
+        "?".to_owned()
+    } else {
+        initials
+    }
+}
+
 fn render_changes_diff(
     buffer: &mut Buffer,
     geometry: &GitViewGeometry,
@@ -1217,7 +1257,10 @@ fn render_history_list(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    let local_now = crate::platform::local_datetime();
+    let upstream = view
+        .status
+        .as_ref()
+        .and_then(|status| status.upstream.as_deref());
     let selected = view.selected_commit_index();
     let (rows, _) = list_rows(view);
     for offset in 0..list.height {
@@ -1227,7 +1270,8 @@ fn render_history_list(
         }
         let y = list.y + offset;
         let rect = Rect::new(list.x, y, list.width.saturating_sub(1), 1);
-        let index = row_index / 2;
+        let end = rect.right().saturating_sub(1);
+        let index = row_index / COMMIT_ROWS;
         let Some(commit) = commits.get(index) else {
             put_text(
                 buffer,
@@ -1239,68 +1283,82 @@ fn render_history_list(
             );
             continue;
         };
+        let line = row_index % COMMIT_ROWS;
+        if line == 2 {
+            // The separator after the last commit not pushed names where pushed history starts.
+            let mut x = rect.x + 1;
+            if !commit.pushed && commits.get(index + 1).is_some_and(|next| next.pushed) {
+                let label = upstream.map_or_else(
+                    || "── pushed ".to_owned(),
+                    |upstream| format!("── pushed to {upstream} "),
+                );
+                x = put_segment(buffer, x, y, end, &label, styles.dim);
+            }
+            let fill = end.saturating_sub(x);
+            put_text(
+                buffer,
+                x,
+                y,
+                fill,
+                &"─".repeat(usize::from(fill)),
+                styles.rule,
+            );
+            continue;
+        }
         let is_selected = selected == Some(index);
         let row_style = if is_selected {
-            styles.selected
-        } else {
+            styles.row_selected
+        } else if commit.pushed {
             styles.base
+        } else {
+            styles.unpushed_row
         };
         buffer.set_style(rect, row_style);
         hits.targets.push((rect, GitViewTarget::Commit(index)));
-        let on_selected = |style: Style| if is_selected { row_style } else { style };
-        if row_index.is_multiple_of(2) {
-            let mark = if commit.pushed { "" } else { "↑" };
-            let right = rect.right().saturating_sub(2);
-            if !mark.is_empty() {
-                put_text(buffer, right, y, 1, mark, on_selected(styles.green));
-            }
-            let subject_style = if commit.merge {
-                on_selected(styles.muted)
+        if is_selected {
+            let edge = if view.focus == GitViewFocus::List {
+                styles.accent
             } else {
-                row_style
+                styles.dim
             };
-            let room = right.saturating_sub(rect.x + 2);
-            put_text(
-                buffer,
-                rect.x + 1,
-                y,
-                room,
-                &fit(&commit.subject, room),
-                subject_style,
-            );
+            put_text(buffer, rect.x, y, 1, "▌", edge);
+        }
+        let x = rect.x + 2;
+        if line == 0 {
+            let mut right = end;
+            if !commit.pushed {
+                right = right.saturating_sub(3);
+                put_text(buffer, right, y, 3, " ↑ ", styles.pill);
+            }
+            let style = if commit.merge {
+                styles.muted
+            } else {
+                styles.bold
+            };
+            let room = right.saturating_sub(x + 1);
+            put_text(buffer, x, y, room, &fit(&commit.subject, room), style);
         } else {
-            let clock = commit_clock(commit.time, now, local_now);
-            let ago = short_ago(now.saturating_sub(commit.time));
-            let files = match commit.files_changed {
-                0 => String::new(),
-                1 => "1 file".to_owned(),
-                count => format!("{count} files"),
-            };
-            let files_width = display_width(&files);
-            let right = rect.right().saturating_sub(files_width + 1);
-            put_text(
+            let chip = styles.chips[commit
+                .author
+                .bytes()
+                .fold(0usize, |hash, byte| hash.wrapping_add(usize::from(byte)))
+                % styles.chips.len()];
+            let mut x = put_segment(buffer, x, y, end, &author_initials(&commit.author), chip);
+            x = put_segment(
                 buffer,
-                right,
+                x,
                 y,
-                files_width,
-                &files,
-                on_selected(styles.dim),
-            );
-            let x = put_segment(
-                buffer,
-                rect.x + 1,
-                y,
-                right.saturating_sub(1),
-                &clock,
-                on_selected(styles.muted),
+                end,
+                &format!(" {}", commit.author),
+                styles.muted,
             );
             put_segment(
                 buffer,
                 x,
                 y,
-                right.saturating_sub(1),
-                &format!(" · {ago} · {}", commit.author),
-                on_selected(styles.dim),
+                end,
+                &format!(" · {}", short_ago(now.saturating_sub(commit.time))),
+                styles.dim,
             );
         }
     }
@@ -1669,6 +1727,15 @@ mod tests {
         assert_eq!(fit("checkpoint_picker.rs", 10), "checkpoin…");
         assert_eq!(fit("漢字かな", 5), "漢字…");
         assert_eq!(fit("abc", 0), "");
+    }
+
+    #[test]
+    fn author_initials_take_two_words() {
+        assert_eq!(author_initials("Ada Lovelace"), "AL");
+        assert_eq!(author_initials("tidy-dev"), "TD");
+        assert_eq!(author_initials("github-actions[bot]"), "GA");
+        assert_eq!(author_initials("çan"), "Ç");
+        assert_eq!(author_initials(""), "?");
     }
 
     #[test]

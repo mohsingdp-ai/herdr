@@ -188,10 +188,16 @@ pub fn git_status_snapshot_for_cwd_with_demand(
         );
     }
 
-    let ahead_behind = fingerprint
-        .head_oid()
-        .zip(fingerprint.upstream_oid())
-        .and_then(|(head_oid, upstream_oid)| git_ahead_behind_between(cwd, head_oid, upstream_oid));
+    let ahead_behind = match (fingerprint.head_oid(), &fingerprint.upstream) {
+        (Some(head_oid), Some(_)) => fingerprint
+            .upstream_oid()
+            .and_then(|upstream_oid| git_ahead_behind_between(cwd, head_oid, upstream_oid)),
+        // A branch never pushed: count the commits no remote has yet.
+        (Some(_), None) if fingerprint.branch_name().is_some() => {
+            git_unpushed_count(cwd).map(|ahead| (ahead, 0))
+        }
+        _ => None,
+    };
     let snapshot = WorkspaceGitStatusSnapshot {
         auto_label,
         branch,
@@ -333,6 +339,52 @@ fn git_ahead_behind_between(
 
     let stdout = String::from_utf8(output.stdout).ok()?;
     parse_git_ahead_behind_output(&stdout)
+}
+
+/// Commits on HEAD that no remote-tracking branch has, for a branch with no
+/// upstream. `None` in a repository without remotes, where nothing is pushed.
+// ponytail: cached with the HEAD fingerprint, so a push that sets no upstream
+// shows until HEAD moves; capped so a huge local history stays cheap.
+fn git_unpushed_count(cwd: &Path) -> Option<usize> {
+    let git = |args: &[&str]| {
+        let output = crate::noninteractive_process::command("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    };
+    if git(&["for-each-ref", "--count=1", "--format=x", "refs/remotes"])?.is_empty() {
+        return None;
+    }
+    git(&[
+        "rev-list",
+        "--count",
+        "--max-count=999",
+        "HEAD",
+        "--not",
+        "--remotes",
+    ])?
+    .parse()
+    .ok()
+}
+
+/// A rebase, merge, cherry-pick or revert stopped midway in `cwd`'s checkout.
+pub fn git_operation(cwd: &Path) -> Option<&'static str> {
+    let git_dir = git_worktree_info(cwd)?.git_dir;
+    [
+        ("rebase-merge", "rebasing"),
+        ("rebase-apply", "rebasing"),
+        ("MERGE_HEAD", "merging"),
+        ("CHERRY_PICK_HEAD", "cherry-picking"),
+        ("REVERT_HEAD", "reverting"),
+    ]
+    .into_iter()
+    .find_map(|(marker, operation)| git_dir.join(marker).exists().then_some(operation))
 }
 
 fn parse_git_ahead_behind_output(stdout: &str) -> Option<(usize, usize)> {
@@ -529,6 +581,48 @@ mod tests {
         assert_eq!(snapshot.branch.as_deref(), Some("main"));
         assert_eq!(snapshot.ahead_behind, None);
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_branch_never_pushed_counts_what_no_remote_has_and_a_rebase_shows() {
+        let root = temp_test_dir("never-pushed");
+        let remote = root.join("remote.git");
+        let repo = root.join("repo");
+        run_git(
+            &root,
+            &["init", "--quiet", "--bare", remote.to_str().unwrap()],
+        );
+        std::fs::create_dir_all(&repo).unwrap();
+        run_git(&repo, &["init", "--quiet"]);
+        run_git(&repo, &["config", "user.email", "herdr@example.invalid"]);
+        run_git(&repo, &["config", "user.name", "Herdr Test"]);
+        run_git(
+            &repo,
+            &["commit", "--quiet", "--allow-empty", "-m", "initial"],
+        );
+        // No remote at all: nothing is pushed anywhere, so nothing is counted.
+        let (snapshot, _) = git_status_snapshot_for_cwd(&repo, None);
+        assert_eq!(snapshot.ahead_behind, None);
+
+        run_git(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(
+            &repo,
+            &["push", "--quiet", "origin", "HEAD:refs/heads/main"],
+        );
+        run_git(&repo, &["checkout", "--quiet", "-b", "feature"]);
+        run_git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "one"]);
+        run_git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "two"]);
+        let (snapshot, _) = git_status_snapshot_for_cwd(&repo, None);
+        assert_eq!(snapshot.branch.as_deref(), Some("feature"));
+        assert_eq!(snapshot.ahead_behind, Some((2, 0)));
+
+        assert_eq!(git_operation(&repo), None);
+        std::fs::create_dir(repo.join(".git/rebase-merge")).unwrap();
+        assert_eq!(git_operation(&repo), Some("rebasing"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

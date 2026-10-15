@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
@@ -1030,6 +1030,10 @@ pub struct ClientShellWorkspace {
     /// Files with uncommitted changes. Optional: older servers never send it.
     #[serde(default)]
     pub git_changes: Option<usize>,
+    /// A rebase or merge stopped midway ("rebasing", "merging", …). Optional:
+    /// older servers never send it.
+    #[serde(default)]
+    pub git_operation: Option<String>,
     pub tokens: Vec<(String, String)>,
     pub worktree: Option<ClientShellWorktree>,
     pub focused: bool,
@@ -2830,6 +2834,7 @@ mod tests {
                 branch: Some("main".into()),
                 git_ahead_behind: None,
                 git_changes: None,
+                git_operation: None,
                 tokens: Vec::new(),
                 worktree: None,
                 focused: true,

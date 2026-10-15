@@ -160,7 +160,10 @@ fn loaded_view() -> (ClientShellState, Vec<crate::api::schema::Request>) {
         &mut state,
         log_request,
         ResponseResult::GitLog {
-            commits: vec![commit("aaaa1111", "fix: first", false)],
+            commits: vec![
+                commit("aaaa1111", "fix: first", false),
+                commit("bbbb2222", "chore: older", true),
+            ],
             has_more: false,
         },
     ));
@@ -427,6 +430,24 @@ fn history_lists_commits_then_a_commits_files_and_one_files_diff() {
     assert!(text.contains("↑ not pushed"), "{text}");
     assert!(text.contains("Ada"), "{text}");
     assert!(text.contains("History ↑1"), "{text}");
+    // The commit not pushed carries the ↑ box and the separator below it marks pushed history.
+    let lines: Vec<&str> = text.lines().collect();
+    let row = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no {needle:?} in {text}"))
+    };
+    let first = row("▌ fix: first");
+    assert!(lines[first].contains(" ↑ "), "{text}");
+    assert!(lines[first + 1].contains("A Ada"), "{text}");
+    assert!(
+        lines[first + 2].contains("── pushed to origin/main ─"),
+        "{text}"
+    );
+    let older = row("  chore: older");
+    assert_eq!(older, first + 3, "{text}");
+    assert!(!lines[older].contains(" ↑ "), "{text}");
 }
 
 #[test]
@@ -728,4 +749,134 @@ fn a_running_operation_is_followed_even_with_the_window_in_the_background() {
     // With nothing running, the routine refresh waits for the window to come back.
     let idle = state.tick_git_view(std::time::Instant::now() + std::time::Duration::from_secs(10));
     assert!(requests(idle.actions).is_empty());
+}
+
+#[test]
+fn agents_carry_their_folders_git_state_and_hovering_makes_it_a_git_button() {
+    let mut config = Config::default();
+    config.ui.sidebar.agents.nested = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut projected = snapshot();
+    projected.workspaces[0].git_ahead_behind = Some((1, 2));
+    projected.workspaces[0].git_changes = Some(3);
+    // A second space with no agent keeps its git state on its own line.
+    let mut other = projected.workspaces[0].clone();
+    other.workspace_id = "ws_2".into();
+    other.label = "other".into();
+    other.focused = false;
+    other.git_ahead_behind = None;
+    other.git_changes = Some(5);
+    projected.workspaces.push(other);
+    projected.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("claude".into()),
+        display_agent: None,
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    }];
+    state.set_snapshot(Box::new(projected.clone()));
+    state.set_pane_surface(surface());
+    let mouse = |state: &mut ClientShellState, column: u16, row: u16, kind: MouseEventKind| {
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        })])
+    };
+    let line = |state: &mut ClientShellState, y: u16| {
+        screen(state)
+            .lines()
+            .nth(usize::from(y))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    screen(&mut state);
+    let (row, _) = state.hits.agents.first().cloned().expect("agent row");
+    let agent_line = line(&mut state, row.y);
+    assert!(agent_line.contains("↑1 ↓2 ±3"), "{agent_line}");
+    assert!(!agent_line.contains('⎇'), "{agent_line}");
+
+    // Hover: the agent's git state becomes the button.
+    mouse(&mut state, row.x + 1, row.y, MouseEventKind::Moved);
+    let agent_line = line(&mut state, row.y);
+    assert!(agent_line.contains(" ⎇ ↑1 ↓2 ±3 "), "{agent_line}");
+    let (button, workspace_id) = state
+        .hits
+        .space_git_badges
+        .iter()
+        .find(|(rect, _)| rect.y == row.y)
+        .cloned()
+        .expect("git button hit");
+    assert_eq!(workspace_id, "ws_1");
+    let pointed = mouse(&mut state, button.x + 1, button.y, MouseEventKind::Moved);
+    assert_eq!(pointed.pointer_shape, Some("pointer"));
+    let opened = mouse(
+        &mut state,
+        button.x + 1,
+        button.y,
+        MouseEventKind::Down(MouseButton::Left),
+    );
+    assert!(state.git_view.is_some());
+    find(&requests(opened.actions), |method| {
+        matches!(method, Method::GitStatus(_))
+    });
+
+    // Choosing the agent itself leaves the git view for its terminal.
+    let chosen = mouse(
+        &mut state,
+        row.x + 1,
+        row.y,
+        MouseEventKind::Down(MouseButton::Left),
+    );
+    assert!(state.git_view.is_none());
+    find(
+        &requests(chosen.actions),
+        |method| matches!(method, Method::PaneFocus(target) if target.pane_id == "pane_1"),
+    );
+
+    // The space with no agent: hovering its line turns "±5" into the button.
+    let space = state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.workspace_id == "ws_2")
+        .map(|hit| hit.rect)
+        .expect("second space");
+    assert!(line(&mut state, space.y).contains("±5"));
+    mouse(&mut state, space.x + 2, space.y, MouseEventKind::Moved);
+    assert!(line(&mut state, space.y).contains(" ⎇ ±5 "));
+    assert!(state
+        .hits
+        .space_git_badges
+        .iter()
+        .any(|(rect, id)| rect.y == space.y && id == "ws_2"));
+
+    // The sidebar edge shows a resize pointer; a pane gives the pointer back.
+    let edge = state.hits.sidebar_divider;
+    let resize = mouse(&mut state, edge.x, edge.y + 3, MouseEventKind::Moved);
+    assert_eq!(resize.pointer_shape, Some("col-resize"));
+    let back = mouse(&mut state, edge.x + 20, edge.y + 3, MouseEventKind::Moved);
+    assert_eq!(back.pointer_shape, Some(""));
+
+    // An agent whose space is not a git folder gets no button.
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    projected.workspaces[0].branch = None;
+    projected.workspaces[0].git_changes = None;
+    projected.workspaces[0].git_ahead_behind = None;
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    screen(&mut state);
+    let (row, _) = state.hits.agents.first().cloned().expect("agent row");
+    mouse(&mut state, row.x + 1, row.y, MouseEventKind::Moved);
+    assert!(!line(&mut state, row.y).contains('⎇'));
 }
