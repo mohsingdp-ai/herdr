@@ -345,7 +345,7 @@ fn git_ahead_behind_between(
 /// upstream. `None` in a repository without remotes, where nothing is pushed.
 // ponytail: cached with the HEAD fingerprint, so a push that sets no upstream
 // shows until HEAD moves; capped so a huge local history stays cheap.
-fn git_unpushed_count(cwd: &Path) -> Option<usize> {
+pub(crate) fn git_unpushed_count(cwd: &Path) -> Option<usize> {
     let git = |args: &[&str]| {
         let output = crate::noninteractive_process::command("git")
             .arg("-C")

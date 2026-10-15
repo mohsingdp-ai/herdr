@@ -28,7 +28,7 @@ pub use self::{
     tab::{NewPane, Tab},
 };
 pub(crate) use self::{
-    git::{git_operation, git_status_snapshot_for_cwd_with_demand},
+    git::{git_operation, git_status_snapshot_for_cwd_with_demand, git_unpushed_count},
     tab::MovedPane,
 };
 

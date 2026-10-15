@@ -570,6 +570,10 @@ fn status_at(root: &Path) -> Result<GitStatusInfo> {
         MAX_STATUS_BYTES,
     )?;
     let mut status = parse_status(&output.stdout, output.truncated);
+    if status.upstream.is_none() && status.head.is_some() {
+        // A branch never pushed: count what no remote has, like the sidebar.
+        status.ahead = crate::workspace::git_unpushed_count(root).unwrap_or(0) as u32;
+    }
     status.root = root.display().to_string();
     status.operation = operation_info(root);
     Ok(status)
@@ -2097,7 +2101,8 @@ u UU N... 100644 100644 100644 100644 e f g conflict.rs\0\
             &["remote", "add", "origin", remote.to_str().unwrap()],
         );
         write(&base, "a.rs", "one\n");
-        committed(&base, "first");
+        // A remote never fetched or pushed to has nothing to compare against.
+        assert_eq!(committed(&base, "first").ahead, 0);
 
         // First push publishes the branch and sets its upstream.
         let status = finished(&base, push(&base, None));
@@ -2151,6 +2156,13 @@ u UU N... 100644 100644 100644 100644 e f g conflict.rs\0\
         let status = finished(&clone, pull(&clone, None));
         assert_eq!(status.behind, 0);
         assert_eq!(read(&clone, "b.rs").as_deref(), Some("b\n"));
+
+        // A new branch never pushed still counts what no remote has.
+        sh(&clone, &["checkout", "-q", "-b", "feature"]);
+        write(&clone, "c.rs", "c\n");
+        let status = committed(&clone, "fourth");
+        assert_eq!(status.upstream, None);
+        assert_eq!(status.ahead, 1);
     }
 
     #[test]
