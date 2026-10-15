@@ -41,6 +41,16 @@ pub struct WorktreeSpaceMembership {
     pub is_linked_worktree: bool,
 }
 
+/// Git state of an agent pane's own folder, which can differ from its space's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneGitStatus {
+    pub pane_id: String,
+    pub branch: Option<String>,
+    pub ahead_behind: Option<(usize, usize)>,
+    pub changes: Option<usize>,
+    pub operation: Option<&'static str>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceGitStatus {
     pub workspace_id: String,

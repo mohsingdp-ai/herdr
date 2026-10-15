@@ -105,6 +105,9 @@ pub(super) struct ShellHitMap {
     /// A space's "±N" uncommitted-changes badge, or a hovered agent's "⎇" button,
     /// which opens that space's git view.
     pub(super) space_git_badges: Vec<(Rect, String)>,
+    /// An agent line's git button or "±N": its space and pane, opening the
+    /// git view on the agent's own folder.
+    pub(super) agent_git_buttons: Vec<(Rect, String, String)>,
     pub(super) git_view: super::git_view::GitViewHits,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,

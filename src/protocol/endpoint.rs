@@ -246,6 +246,7 @@ mod tests {
             tabs: Vec::new(),
             panes: Vec::new(),
             agents: Vec::new(),
+            agent_git: Vec::new(),
             commands: Vec::new(),
         }
     }

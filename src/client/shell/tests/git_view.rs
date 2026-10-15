@@ -575,7 +575,7 @@ fn a_server_without_git_methods_says_so_instead_of_loading() {
     state.set_pane_surface(surface());
     state.set_endpoint_methods(Some(vec!["workspace.focus".into()]));
     let mut outcome = ClientShellInput::default();
-    state.open_git_view(None, &mut outcome);
+    state.open_git_view(None, None, &mut outcome);
     assert!(requests(outcome.actions).is_empty());
     let text = screen(&mut state);
     assert!(text.contains("no git support"), "{text}");
@@ -783,6 +783,14 @@ fn agents_carry_their_folders_git_state_and_hovering_makes_it_a_git_button() {
         tokens: Vec::new(),
         focused: false,
     }];
+    // The agent works in another worktree, so its line shows that folder's state.
+    projected.agent_git = vec![crate::protocol::ClientShellAgentGit {
+        pane_id: "pane_1".into(),
+        branch: Some("feat/other".into()),
+        ahead_behind: Some((2, 0)),
+        changes: Some(1),
+        operation: None,
+    }];
     state.set_snapshot(Box::new(projected.clone()));
     state.set_pane_surface(surface());
     let mouse = |state: &mut ClientShellState, column: u16, row: u16, kind: MouseEventKind| {
@@ -803,21 +811,25 @@ fn agents_carry_their_folders_git_state_and_hovering_makes_it_a_git_button() {
     screen(&mut state);
     let (row, _) = state.hits.agents.first().cloned().expect("agent row");
     let agent_line = line(&mut state, row.y);
-    assert!(agent_line.contains("↑1 ↓2 ±3"), "{agent_line}");
+    assert!(agent_line.contains("↑2 ±1"), "{agent_line}");
+    assert!(!agent_line.contains("±3"), "{agent_line}");
     assert!(!agent_line.contains('⎇'), "{agent_line}");
 
     // Hover: the agent's git state becomes the button.
     mouse(&mut state, row.x + 1, row.y, MouseEventKind::Moved);
     let agent_line = line(&mut state, row.y);
-    assert!(agent_line.contains(" ⎇ ↑1 ↓2 ±3 "), "{agent_line}");
-    let (button, workspace_id) = state
+    assert!(agent_line.contains(" ⎇ ↑2 ±1 "), "{agent_line}");
+    let (button, workspace_id, pane_id) = state
         .hits
-        .space_git_badges
+        .agent_git_buttons
         .iter()
-        .find(|(rect, _)| rect.y == row.y)
+        .find(|(rect, _, _)| rect.y == row.y)
         .cloned()
         .expect("git button hit");
-    assert_eq!(workspace_id, "ws_1");
+    assert_eq!(
+        (workspace_id.as_str(), pane_id.as_str()),
+        ("ws_1", "pane_1")
+    );
     let pointed = mouse(&mut state, button.x + 1, button.y, MouseEventKind::Moved);
     assert_eq!(pointed.pointer_shape, Some("pointer"));
     let opened = mouse(
@@ -827,8 +839,10 @@ fn agents_carry_their_folders_git_state_and_hovering_makes_it_a_git_button() {
         MouseEventKind::Down(MouseButton::Left),
     );
     assert!(state.git_view.is_some());
+    // The git view reads the agent's own folder, by pane.
     find(&requests(opened.actions), |method| {
-        matches!(method, Method::GitStatus(_))
+        matches!(method, Method::GitStatus(target)
+            if target.pane_id.as_deref() == Some("pane_1") && target.workspace_id.is_none())
     });
 
     // Choosing the agent itself leaves the git view for its terminal.
@@ -873,6 +887,7 @@ fn agents_carry_their_folders_git_state_and_hovering_makes_it_a_git_button() {
     projected.workspaces[0].branch = None;
     projected.workspaces[0].git_changes = None;
     projected.workspaces[0].git_ahead_behind = None;
+    projected.agent_git.clear();
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
     screen(&mut state);

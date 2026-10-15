@@ -66,6 +66,7 @@ fn test_snapshot(boot_id: &str, revision: u64) -> crate::protocol::ClientShellSn
         tabs: Vec::new(),
         panes: Vec::new(),
         agents: Vec::new(),
+        agent_git: Vec::new(),
         commands: Vec::new(),
     }
 }
@@ -432,6 +433,7 @@ fn activation_requires_an_exact_snapshot_surface_revision_pair() {
         tabs: Vec::new(),
         panes: Vec::new(),
         agents: Vec::new(),
+        agent_git: Vec::new(),
         commands: Vec::new(),
     };
     assert_eq!(

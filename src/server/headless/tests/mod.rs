@@ -4799,6 +4799,7 @@ fn unchanged_git_refresh_does_not_request_headless_render() {
             operation: None,
             space: None,
         }],
+        pane_results: Vec::new(),
         cache_updates: Vec::new(),
     });
 
@@ -4859,6 +4860,7 @@ fn changed_git_refresh_requests_headless_render() {
             operation: None,
             space: None,
         }],
+        pane_results: Vec::new(),
         cache_updates: Vec::new(),
     });
 

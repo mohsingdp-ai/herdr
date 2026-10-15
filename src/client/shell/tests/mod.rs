@@ -64,6 +64,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
             right_click_passthrough: false,
         }],
         agents: Vec::new(),
+        agent_git: Vec::new(),
         commands: Vec::new(),
     }
 }

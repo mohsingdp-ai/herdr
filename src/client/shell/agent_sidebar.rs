@@ -16,6 +16,8 @@ pub(super) struct AgentRow {
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
+    /// Git state of the agent's own folder, when the endpoint sends it.
+    pub(super) git: Option<crate::protocol::ClientShellAgentGit>,
 }
 
 pub(super) fn ordered_agent_pane_ids(
@@ -106,10 +108,13 @@ pub(super) fn render_agent_panel(
             render_panel_row(buffer, rect, row, grouped, config, |buffer, inner, row| {
                 hits.agents.push((rect, row.pane_id.clone()));
                 render_agent_row(buffer, inner, row, config);
-                let in_repo = snapshot.workspaces.iter().any(|workspace| {
-                    workspace.workspace_id == row.workspace_id
-                        && super::sidebar::is_git_folder(workspace)
-                });
+                let in_repo = match row.git.as_ref() {
+                    Some(git) => super::sidebar::FolderGit::of_agent(git).is_repo(),
+                    None => snapshot.workspaces.iter().any(|workspace| {
+                        workspace.workspace_id == row.workspace_id
+                            && super::sidebar::FolderGit::of_space(workspace).is_repo()
+                    }),
+                };
                 if hovered_agent == Some(row.pane_id.as_str()) {
                     buffer.set_style(rect, Style::default().bg(config.palette.surface0));
                     if in_repo && rect.width >= 8 {
@@ -120,6 +125,7 @@ pub(super) fn render_agent_panel(
                             &[],
                             true,
                             &row.workspace_id,
+                            Some(row.pane_id.as_str()),
                             config,
                             hits,
                         );
@@ -464,6 +470,11 @@ pub(super) fn agent_row(
         status: agent.agent_status,
         focused: agent.focused,
         rows,
+        git: snapshot
+            .agent_git
+            .iter()
+            .find(|git| git.pane_id == agent.pane_id)
+            .cloned(),
     })
 }
 

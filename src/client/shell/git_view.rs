@@ -310,6 +310,9 @@ pub(super) struct ClientGitView {
     pub(super) generation: u64,
     pub(super) boot_id: String,
     pub(super) workspace_id: String,
+    /// Set when opened from an agent's line: requests use that pane's own
+    /// folder, which can be another worktree or repo than the space's.
+    pub(super) pane_id: Option<String>,
     /// The space's tab in front when the view opened; choosing another tab closes it.
     tab_id: Option<String>,
     /// The view asked to focus its space and waits until then before following focus.
@@ -351,11 +354,17 @@ pub(super) struct ClientGitView {
 }
 
 impl ClientGitView {
+    /// The workspace a request names; none when a pane names the folder.
+    fn scope_workspace_id(&self) -> Option<String> {
+        self.pane_id.is_none().then(|| self.workspace_id.clone())
+    }
+
     fn new(generation: u64, boot_id: String, workspace_id: String, tab: GitViewTab) -> Self {
         Self {
             generation,
             boot_id,
             workspace_id,
+            pane_id: None,
             tab_id: None,
             focus_requested_until: None,
             tab,
@@ -577,14 +586,16 @@ impl ClientShellState {
         if self.git_view.is_some() {
             self.close_git_view(outcome);
         } else {
-            self.open_git_view(None, outcome);
+            self.open_git_view(None, None, outcome);
         }
     }
 
-    /// Opens the git view, focusing `workspace_id` first when given.
+    /// Opens the git view, focusing `workspace_id` first when given. With
+    /// `pane_id`, it shows that agent pane's own folder.
     pub(super) fn open_git_view(
         &mut self,
         workspace_id: Option<String>,
+        pane_id: Option<String>,
         outcome: &mut ClientShellInput,
     ) {
         let Some(snapshot) = self.snapshot.as_deref() else {
@@ -606,18 +617,19 @@ impl ClientShellState {
                 outcome,
             );
         }
-        let reuse = self
-            .git_view
-            .as_ref()
-            .is_some_and(|view| view.workspace_id == target && view.boot_id == boot_id);
+        let reuse = self.git_view.as_ref().is_some_and(|view| {
+            view.workspace_id == target && view.pane_id == pane_id && view.boot_id == boot_id
+        });
         if !reuse {
             self.git_view_generation = self.git_view_generation.wrapping_add(1);
-            self.git_view = Some(ClientGitView::new(
+            let mut view = ClientGitView::new(
                 self.git_view_generation,
                 boot_id,
                 target,
                 GitViewTab::Changes,
-            ));
+            );
+            view.pane_id = pane_id;
+            self.git_view = Some(view);
         }
         if let Some(view) = self.git_view.as_mut() {
             if needs_focus {
@@ -720,8 +732,8 @@ impl ClientShellState {
         }
         let generation = view.generation;
         let target = |view: &ClientGitView| crate::api::schema::GitTarget {
-            workspace_id: Some(view.workspace_id.clone()),
-            pane_id: None,
+            workspace_id: view.scope_workspace_id(),
+            pane_id: view.pane_id.clone(),
             root: None,
         };
         let mut requests: Vec<(Method, GitRequest)> = Vec::new();
@@ -737,8 +749,8 @@ impl ClientShellState {
             view.log_in_flight = true;
             requests.push((
                 Method::GitLog(crate::api::schema::GitLogParams {
-                    workspace_id: Some(view.workspace_id.clone()),
-                    pane_id: None,
+                    workspace_id: view.scope_workspace_id(),
+                    pane_id: view.pane_id.clone(),
                     limit: None,
                 }),
                 GitRequest::Log,
@@ -754,8 +766,8 @@ impl ClientShellState {
                 view.show_in_flight = Some(commit.clone());
                 requests.push((
                     Method::GitShow(crate::api::schema::GitShowParams {
-                        workspace_id: Some(view.workspace_id.clone()),
-                        pane_id: None,
+                        workspace_id: view.scope_workspace_id(),
+                        pane_id: view.pane_id.clone(),
                         commit: commit.clone(),
                     }),
                     GitRequest::Show { commit },
@@ -782,8 +794,8 @@ impl ClientShellState {
                     };
                     requests.push((
                         Method::GitDiff(crate::api::schema::GitDiffParams {
-                            workspace_id: Some(view.workspace_id.clone()),
-                            pane_id: None,
+                            workspace_id: view.scope_workspace_id(),
+                            pane_id: view.pane_id.clone(),
                             path,
                             orig_path,
                             commit,
@@ -862,8 +874,8 @@ impl ClientShellState {
         hunk: Option<String>,
     ) -> crate::api::schema::GitPathsParams {
         crate::api::schema::GitPathsParams {
-            workspace_id: Some(view.workspace_id.clone()),
-            pane_id: None,
+            workspace_id: view.scope_workspace_id(),
+            pane_id: view.pane_id.clone(),
             root: view.shown_root(),
             paths,
             hunk,
@@ -985,8 +997,8 @@ impl ClientShellState {
             return;
         }
         let method = Method::GitDiscard(crate::api::schema::GitDiscardParams {
-            workspace_id: Some(view.workspace_id.clone()),
-            pane_id: None,
+            workspace_id: view.scope_workspace_id(),
+            pane_id: view.pane_id.clone(),
             root: view.shown_root(),
             paths: vec![file.path],
         });
@@ -1029,8 +1041,8 @@ impl ClientShellState {
             return;
         }
         let method = Method::GitDiscard(crate::api::schema::GitDiscardParams {
-            workspace_id: Some(view.workspace_id.clone()),
-            pane_id: None,
+            workspace_id: view.scope_workspace_id(),
+            pane_id: view.pane_id.clone(),
             root: view.shown_root(),
             paths,
         });
@@ -1061,8 +1073,8 @@ impl ClientShellState {
             format!("{summary}\n\n{description}")
         };
         let method = Method::GitCommit(crate::api::schema::GitCommitParams {
-            workspace_id: Some(view.workspace_id.clone()),
-            pane_id: None,
+            workspace_id: view.scope_workspace_id(),
+            pane_id: view.pane_id.clone(),
             root: view.shown_root(),
             message: message.clone(),
             all: view.staged_count() == 0,
@@ -1083,8 +1095,8 @@ impl ClientShellState {
             return;
         };
         let method = Method::GitUncommit(crate::api::schema::GitUncommitParams {
-            workspace_id: Some(view.workspace_id.clone()),
-            pane_id: None,
+            workspace_id: view.scope_workspace_id(),
+            pane_id: view.pane_id.clone(),
             root: view.shown_root(),
             commit: undo.commit,
         });
@@ -1103,8 +1115,8 @@ impl ClientShellState {
             return;
         };
         let target = crate::api::schema::GitTarget {
-            workspace_id: Some(view.workspace_id.clone()),
-            pane_id: None,
+            workspace_id: view.scope_workspace_id(),
+            pane_id: view.pane_id.clone(),
             root: view.shown_root(),
         };
         self.start_git_operation(
@@ -1120,8 +1132,8 @@ impl ClientShellState {
             return;
         };
         let target = crate::api::schema::GitTarget {
-            workspace_id: Some(view.workspace_id.clone()),
-            pane_id: None,
+            workspace_id: view.scope_workspace_id(),
+            pane_id: view.pane_id.clone(),
             root: view.shown_root(),
         };
         self.start_git_operation(

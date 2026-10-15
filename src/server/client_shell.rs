@@ -265,6 +265,17 @@ pub(super) fn snapshot_with_completions(
         panes,
         agents,
         commands: app.client_shell_command_manifest(),
+        agent_git: app
+            .pane_git_statuses
+            .iter()
+            .map(|status| protocol::ClientShellAgentGit {
+                pane_id: status.pane_id.clone(),
+                branch: status.branch.clone(),
+                ahead_behind: status.ahead_behind,
+                changes: status.changes,
+                operation: status.operation.map(str::to_owned),
+            })
+            .collect(),
     };
     (shell, completions)
 }

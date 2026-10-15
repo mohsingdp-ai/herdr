@@ -50,6 +50,11 @@ impl ClientShellState {
             .space_git_badges
             .iter()
             .any(|(rect, _)| over(*rect))
+            || self
+                .hits
+                .agent_git_buttons
+                .iter()
+                .any(|(rect, _, _)| over(*rect))
             || self.hits.git_view.targets.iter().any(|(rect, target)| {
                 over(*rect)
                     && matches!(
@@ -2242,12 +2247,19 @@ impl ClientShellState {
                 }
                 let git_badge = self
                     .hits
-                    .space_git_badges
+                    .agent_git_buttons
                     .iter()
-                    .find(|(rect, _)| super::contains(*rect, point))
-                    .map(|(_, workspace_id)| workspace_id.clone());
-                if let Some(workspace_id) = git_badge {
-                    self.open_git_view(Some(workspace_id), outcome);
+                    .find(|(rect, _, _)| super::contains(*rect, point))
+                    .map(|(_, workspace_id, pane_id)| (workspace_id.clone(), Some(pane_id.clone())))
+                    .or_else(|| {
+                        self.hits
+                            .space_git_badges
+                            .iter()
+                            .find(|(rect, _)| super::contains(*rect, point))
+                            .map(|(_, workspace_id)| (workspace_id.clone(), None))
+                    });
+                if let Some((workspace_id, pane_id)) = git_badge {
+                    self.open_git_view(Some(workspace_id), pane_id, outcome);
                     return;
                 }
                 let workspace_press = self

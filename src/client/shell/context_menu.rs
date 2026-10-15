@@ -283,7 +283,7 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                 }
             }
-            ClientContextMenuAction::Git => self.open_git_view(Some(workspace_id), outcome),
+            ClientContextMenuAction::Git => self.open_git_view(Some(workspace_id), None, outcome),
             ClientContextMenuAction::Rewind => {
                 if let Some(pane_id) = self.workspace_folder_pane(&workspace_id) {
                     self.open_checkpoint_picker(pane_id, outcome);

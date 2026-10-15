@@ -188,6 +188,8 @@ pub enum AppEvent {
     /// Background git status refresh completed for workspaces.
     GitStatusRefreshed {
         results: Vec<WorkspaceGitStatus>,
+        /// Agent panes' own folders, by public pane id.
+        pane_results: Vec<crate::workspace::PaneGitStatus>,
         cache_updates: Vec<(std::path::PathBuf, GitStatusCacheEntry)>,
     },
     /// Background validation of a saved membership after session restore.

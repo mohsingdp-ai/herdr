@@ -948,6 +948,22 @@ pub struct ClientShellSnapshot {
     pub panes: Vec<ClientShellPane>,
     pub agents: Vec<ClientShellAgent>,
     pub commands: Vec<ClientShellCommand>,
+    /// Git state of each agent's own folder, by pane. Optional: older
+    /// servers never send it.
+    #[serde(default)]
+    pub agent_git: Vec<ClientShellAgentGit>,
+}
+
+/// Git state of the folder an agent works in, which can differ from its space's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellAgentGit {
+    pub pane_id: String,
+    pub branch: Option<String>,
+    pub ahead_behind: Option<(usize, usize)>,
+    /// Files with uncommitted changes.
+    pub changes: Option<usize>,
+    /// A rebase or merge stopped midway ("rebasing", "merging", …).
+    pub operation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2861,6 +2877,7 @@ mod tests {
                 right_click_passthrough: false,
             }],
             agents: Vec::new(),
+            agent_git: Vec::new(),
             commands: vec![ClientShellCommand {
                 command_id: "cmd_0123456789abcdef0123456789abcdef".into(),
                 binding_label: "prefix+z".into(),
