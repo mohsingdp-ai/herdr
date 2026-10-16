@@ -2349,7 +2349,7 @@ async fn run_client_loop(
                         let git = shell.tick_git_view(now);
                         outcome.repaint |= git.repaint;
                         outcome.actions.extend(git.actions);
-                        let board = shell.tick_board_view();
+                        let board = shell.tick_board_view(now);
                         outcome.repaint |= board.repaint;
                         outcome.actions.extend(board.actions);
                         for expired in expired_endpoints {

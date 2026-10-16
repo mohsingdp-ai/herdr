@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::api::schema::{Method, Request, ResponseResult};
+use crate::api::schema::{EventData, EventEnvelope, EventKind, Method, Request, ResponseResult};
 use crate::app::App;
 use crate::tasks::{self, TaskError};
 
@@ -17,6 +17,7 @@ pub(crate) fn is_task_method(method: &Method) -> bool {
             | Method::TaskCreate(_)
             | Method::TaskUpdate(_)
             | Method::TaskInit(_)
+            | Method::TaskStamp(_)
     )
 }
 
@@ -37,6 +38,10 @@ impl App {
         respond_to: std::sync::mpsc::Sender<String>,
     ) {
         let id = request.id;
+        let writes = matches!(
+            request.method,
+            Method::TaskCreate(_) | Method::TaskUpdate(_) | Method::TaskInit(_)
+        );
         let (workspace_id, pane_id, work): (Option<String>, Option<String>, TaskWork) =
             match request.method {
                 Method::TaskList(target) => (
@@ -48,6 +53,13 @@ impl App {
                     target.workspace_id,
                     target.pane_id,
                     Box::new(|folder| tasks::init(&folder).map(board)),
+                ),
+                Method::TaskStamp(target) => (
+                    target.workspace_id,
+                    target.pane_id,
+                    Box::new(|folder| {
+                        tasks::stamp(&folder).map(|stamp| ResponseResult::TaskStamp { stamp })
+                    }),
                 ),
                 Method::TaskGet(params) => (
                     params.workspace_id,
@@ -70,18 +82,42 @@ impl App {
                     return;
                 }
             };
-        let folder = match self.task_folder(workspace_id.as_deref(), pane_id.as_deref()) {
-            Ok(folder) => folder,
-            Err((code, message)) => {
-                let _ = respond_to.send(encode_error(id, code, message));
-                return;
-            }
-        };
+        let (folder, workspace_index) =
+            match self.task_folder(workspace_id.as_deref(), pane_id.as_deref()) {
+                Ok(found) => found,
+                Err((code, message)) => {
+                    let _ = respond_to.send(encode_error(id, code, message));
+                    return;
+                }
+            };
+        // Writes tell subscribers which space's tasks changed.
+        let changed = writes.then(|| {
+            (
+                self.event_hub.clone(),
+                self.public_workspace_id(workspace_index),
+            )
+        });
         let worker_respond_to = respond_to.clone();
         let worker_id = id.clone();
         let spawned = crate::thread_spawn::spawn_named("herdr-task-api", move || {
             let response = match work(folder) {
-                Ok(result) => encode_success(worker_id, result),
+                Ok(result) => {
+                    if let Some((hub, workspace_id)) = changed {
+                        let task_id = match &result {
+                            ResponseResult::TaskDetail { task } => Some(task.summary.id.clone()),
+                            _ => None,
+                        };
+                        // Straight to the hub from this thread: no plugin hooks run for it.
+                        hub.push(EventEnvelope {
+                            event: EventKind::TasksChanged,
+                            data: EventData::TasksChanged {
+                                workspace_id,
+                                task_id,
+                            },
+                        });
+                    }
+                    encode_success(worker_id, result)
+                }
                 Err(err) => encode_error(worker_id, err.code(), err.message()),
             };
             let _ = worker_respond_to.send(response);
@@ -97,7 +133,7 @@ impl App {
         &self,
         workspace_id: Option<&str>,
         pane_id: Option<&str>,
-    ) -> Result<PathBuf, (&'static str, String)> {
+    ) -> Result<(PathBuf, usize), (&'static str, String)> {
         let workspace_index = match workspace_id {
             Some(workspace_id) => self.parse_workspace_id(workspace_id).ok_or_else(|| {
                 (
@@ -118,6 +154,7 @@ impl App {
             .ok_or_else(|| ("workspace_not_found", "workspace not found".to_owned()))?;
         workspace
             .resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+            .map(|folder| (folder, workspace_index))
             .ok_or_else(|| {
                 (
                     "backlog_not_initialized",

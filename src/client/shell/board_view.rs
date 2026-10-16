@@ -11,6 +11,9 @@ use crossterm::event::KeyEventKind;
 use super::*;
 use crate::api::schema::{Method, ResponseResult, TaskBoardInfo, TaskDetail, TaskSummary};
 
+/// While a Board is on screen, it asks this often whether its tasks changed.
+const STAMP_INTERVAL: Duration = Duration::from_secs(2);
+
 /// Priority filter choices after "all".
 pub(super) const PRIORITIES: [&str; 3] = ["high", "medium", "low"];
 
@@ -51,6 +54,8 @@ pub(super) enum BoardFilter {
 #[derive(Debug)]
 pub(super) enum BoardRequest {
     List,
+    /// Whether the tasks changed since the list on screen.
+    Stamp,
     Get {
         id: String,
     },
@@ -161,6 +166,8 @@ pub(super) struct ClientBoardView {
     pub(super) saving: HashSet<String>,
     /// The list should be read again.
     list_stale: bool,
+    stamp_in_flight: bool,
+    next_stamp_check: Instant,
     list_in_flight: bool,
     get_in_flight: Option<String>,
 }
@@ -217,6 +224,8 @@ impl ClientBoardView {
             editing: None,
             saving: HashSet::new(),
             list_stale: true,
+            stamp_in_flight: false,
+            next_stamp_check: Instant::now() + STAMP_INTERVAL,
             list_in_flight: false,
             get_in_flight: None,
         }
@@ -590,12 +599,36 @@ impl ClientShellState {
         self.board_view_needs_load = true;
     }
 
-    /// Sends a load a retarget left waiting.
-    pub(crate) fn tick_board_view(&mut self) -> ClientShellInput {
+    /// Sends a load a retarget left waiting, and every [`STAMP_INTERVAL`]
+    /// asks whether the tasks changed (an agent's `herdr task`, a raw
+    /// `backlog` edit, another Board). Nothing happens while no Board is open.
+    pub(crate) fn tick_board_view(&mut self, now: Instant) -> ClientShellInput {
         let mut outcome = ClientShellInput::default();
         if std::mem::take(&mut self.board_view_needs_load) {
             self.load_board_view(&mut outcome);
         }
+        // Nobody is looking while the terminal window is in the background.
+        let in_background = self.outer_focused == Some(false);
+        let Some(view) = self.board_view.as_mut() else {
+            return outcome;
+        };
+        let watching = matches!(view.load, BoardLoad::Ready | BoardLoad::NotInitialized);
+        if !watching
+            || in_background
+            || now < view.next_stamp_check
+            || view.stamp_in_flight
+            || view.list_in_flight
+        {
+            return outcome;
+        }
+        view.next_stamp_check = now + STAMP_INTERVAL;
+        view.stamp_in_flight = true;
+        let generation = view.generation;
+        let method = Method::TaskStamp(crate::api::schema::TaskTarget {
+            workspace_id: Some(view.workspace_id.clone()),
+            pane_id: None,
+        });
+        self.send_board_request(method, generation, BoardRequest::Stamp, &mut outcome);
         outcome
     }
 
@@ -696,6 +729,7 @@ impl ClientShellState {
                     view.draft = draft;
                 }
                 view.list_in_flight = false;
+                view.stamp_in_flight = false;
                 view.get_in_flight = None;
                 view.init_busy = false;
             }
@@ -1556,6 +1590,14 @@ impl ClientShellState {
                     },
                 }
             }
+            BoardRequest::Stamp => {
+                view.stamp_in_flight = false;
+                if let Ok(ResponseResult::TaskStamp { stamp }) = result {
+                    // Changed since the list on screen, or set up since "not set up".
+                    let shown = view.board.as_ref().map(|board| board.stamp.as_str());
+                    view.list_stale |= shown != Some(stamp.as_str());
+                }
+            }
             BoardRequest::Get { id } => {
                 if view.get_in_flight.as_ref() == Some(&id) {
                     view.get_in_flight = None;
@@ -1706,6 +1748,7 @@ mod tests {
                 task("T-2", "To Do", Some("high"), Some("@dev")),
                 task("T-3", "Done", None, Some("@qa")),
             ],
+            stamp: String::new(),
         });
         view
     }

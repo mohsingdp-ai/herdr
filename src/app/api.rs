@@ -1133,7 +1133,8 @@ impl App {
             | Method::TaskGet(_)
             | Method::TaskCreate(_)
             | Method::TaskUpdate(_)
-            | Method::TaskInit(_) => {
+            | Method::TaskInit(_)
+            | Method::TaskStamp(_) => {
                 return responses::encode_error(
                     request.id,
                     "invalid_request",

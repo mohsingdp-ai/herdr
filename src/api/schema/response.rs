@@ -101,6 +101,10 @@ pub enum ResponseResult {
     TaskDetail {
         task: TaskDetail,
     },
+    TaskStamp {
+        /// Changes whenever a task file or the project config changes.
+        stamp: String,
+    },
     WorktreeList {
         source: WorktreeSourceInfo,
         worktrees: Vec<WorktreeInfo>,

@@ -148,6 +148,7 @@ fn board() -> ResponseResult {
                 "Done".into(),
             ],
             tasks: vec![task("TASK-1", "Design the login API", "To Do"), second],
+            stamp: String::new(),
         },
     }
 }
@@ -652,4 +653,82 @@ fn a_multi_line_description_is_not_flattened() {
         .as_ref()
         .is_some_and(|view| view.editing.is_none()));
     assert!(screen(&mut state, 150).contains("edited in the task file"));
+}
+
+/// What the Board's timer sends `secs` from now.
+fn tick(state: &mut ClientShellState, secs: u64) -> Vec<crate::api::schema::Request> {
+    requests(
+        state
+            .tick_board_view(std::time::Instant::now() + std::time::Duration::from_secs(secs))
+            .actions,
+    )
+}
+
+#[test]
+fn an_open_board_rereads_the_list_only_when_its_stamp_changes() {
+    let mut state = loaded();
+    assert!(tick(&mut state, 0).is_empty(), "not before the interval");
+    let polled = tick(&mut state, 3);
+    assert!(
+        matches!(&polled[..], [request] if matches!(&request.method, Method::TaskStamp(target) if target.workspace_id.as_deref() == Some("ws_1"))),
+        "{polled:?}"
+    );
+    assert!(tick(&mut state, 6).is_empty(), "one check at a time");
+    // The board() fixture's stamp is empty: the same answer reads nothing.
+    let same = answer(
+        &mut state,
+        &polled[0],
+        Ok(ResponseResult::TaskStamp {
+            stamp: String::new(),
+        }),
+    );
+    assert!(same.is_empty(), "{same:?}");
+
+    let polled = tick(&mut state, 9);
+    let reread = answer(
+        &mut state,
+        &polled[0],
+        Ok(ResponseResult::TaskStamp {
+            stamp: "changed".into(),
+        }),
+    );
+    assert!(
+        reread
+            .iter()
+            .any(|request| matches!(request.method, Method::TaskList(_))),
+        "{reread:?}"
+    );
+
+    // Closed, the Board asks nothing.
+    state.handle_input_bytes(b"\x1b");
+    assert!(state.board_view.is_none());
+    assert!(tick(&mut state, 60).is_empty());
+}
+
+#[test]
+fn a_space_set_up_elsewhere_shows_its_board() {
+    let mut state = state();
+    let opened = open_by_tab(&mut state);
+    answer(
+        &mut state,
+        &opened[0],
+        Err(ClientShellEndpointError {
+            code: Some("backlog_not_initialized".into()),
+            message: "no project".into(),
+        }),
+    );
+    let polled = tick(&mut state, 3);
+    let reread = answer(
+        &mut state,
+        &polled[0],
+        Ok(ResponseResult::TaskStamp {
+            stamp: "new".into(),
+        }),
+    );
+    let list = reread
+        .iter()
+        .find(|request| matches!(request.method, Method::TaskList(_)))
+        .expect("the list is read once the project exists");
+    answer(&mut state, list, Ok(board()));
+    assert!(screen(&mut state, 150).contains("▾ To Do 1"));
 }

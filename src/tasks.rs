@@ -70,7 +70,9 @@ type Result<T> = std::result::Result<T, TaskError>;
 pub(crate) fn list(folder: &Path) -> Result<TaskBoardInfo> {
     let project = Project::find(folder)?;
     // Files first: a task changed in between then reads as a conflict on its
-    // next write, never as a fresh fingerprint over stale fields.
+    // next write, never as a fresh fingerprint over stale fields, and as a
+    // new stamp, so a watching Board reads the list again.
+    let stamp = project.stamp();
     let mut files = scan(&project.tasks);
     let list: ListJson = parse_json(&backlog(&project.root, &["task", "list", "--json"])?)?;
     let tasks = list
@@ -85,7 +87,14 @@ pub(crate) fn list(folder: &Path) -> Result<TaskBoardInfo> {
         root: project.root.display().to_string(),
         statuses: project.statuses(),
         tasks,
+        stamp,
     })
+}
+
+/// A cheap check for changes: no `backlog` call, only file names, sizes
+/// and times, so a Board can ask every few seconds.
+pub(crate) fn stamp(folder: &Path) -> Result<String> {
+    Ok(Project::find(folder)?.stamp())
 }
 
 pub(crate) fn get(folder: &Path, id: &str) -> Result<TaskDetail> {
@@ -235,6 +244,28 @@ impl Project {
             }
         }
         Err(TaskError::NotInitialized)
+    }
+
+    fn stamp(&self) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut entries: Vec<(std::ffi::OsString, u64, Option<std::time::SystemTime>)> =
+            std::fs::read_dir(&self.tasks)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|entry| {
+                    let metadata = entry.metadata().ok()?;
+                    Some((entry.file_name(), metadata.len(), metadata.modified().ok()))
+                })
+                .collect();
+        entries.sort();
+        entries.hash(&mut hasher);
+        std::fs::metadata(&self.config)
+            .ok()
+            .map(|metadata| (metadata.len(), metadata.modified().ok()))
+            .hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
     }
 
     fn statuses(&self) -> Vec<String> {
@@ -674,6 +705,11 @@ mod tests {
 
             // The list carries dependencies read from the task files.
             let board = list(&dir).unwrap();
+            assert_eq!(
+                stamp(&dir).unwrap(),
+                board.stamp,
+                "unchanged since the list"
+            );
             let listed = board
                 .tasks
                 .iter()
@@ -700,6 +736,11 @@ mod tests {
             assert_eq!(moved.summary.acceptance_criteria_checked, 1);
             assert_eq!(moved.comments.len(), 1);
             assert_ne!(moved.summary.fingerprint, first.summary.fingerprint);
+            assert_ne!(
+                stamp(&dir).unwrap(),
+                board.stamp,
+                "a write changes the stamp"
+            );
 
             // The stale fingerprint is refused and nothing is written.
             let stale = update(

@@ -38,6 +38,8 @@ pub enum Subscription {
     WorktreeOpened {},
     #[serde(rename = "worktree.removed")]
     WorktreeRemoved {},
+    #[serde(rename = "tasks.changed")]
+    TasksChanged {},
     #[serde(rename = "tab.created")]
     TabCreated {},
     #[serde(rename = "tab.closed")]
@@ -203,6 +205,7 @@ pub enum EventKind {
     WorktreeCreated,
     WorktreeOpened,
     WorktreeRemoved,
+    TasksChanged,
     TabCreated,
     TabClosed,
     TabRenamed,
@@ -234,6 +237,7 @@ impl EventKind {
             EventKind::WorktreeCreated => "worktree.created",
             EventKind::WorktreeOpened => "worktree.opened",
             EventKind::WorktreeRemoved => "worktree.removed",
+            EventKind::TasksChanged => "tasks.changed",
             EventKind::TabCreated => "tab.created",
             EventKind::TabClosed => "tab.closed",
             EventKind::TabRenamed => "tab.renamed",
@@ -266,6 +270,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::WorktreeCreated,
     EventKind::WorktreeOpened,
     EventKind::WorktreeRemoved,
+    EventKind::TasksChanged,
     EventKind::TabCreated,
     EventKind::TabClosed,
     EventKind::TabRenamed,
@@ -467,6 +472,13 @@ pub enum EventData {
         workspace: Option<WorkspaceInfo>,
         worktree: WorktreeInfo,
         forced: bool,
+    },
+    /// A `task.*` write changed this workspace's tasks.
+    TasksChanged {
+        workspace_id: String,
+        /// The task written; absent after `task.init`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
     },
     TabCreated {
         tab: TabInfo,

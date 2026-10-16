@@ -133,6 +133,7 @@ operations::define_operations! {
     TaskCreate(TaskCreateParams) => "task.create", false, true;
     TaskUpdate(TaskUpdateParams) => "task.update", false, true;
     TaskInit(TaskTarget) => "task.init", false, true;
+    TaskStamp(TaskTarget) => "task.stamp", false, true;
     PaneSelectionRead(PaneSelectionReadParams) => "pane.selection.read", false, true;
     PaneCopyMotion(PaneCopyMotionParams) => "pane.copy_motion", false, true;
     PaneCopySearch(PaneCopySearchParams) => "pane.copy_search", false, true;

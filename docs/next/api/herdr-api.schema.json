@@ -331,6 +331,30 @@
               "type": "object"
             },
             {
+              "description": "A `task.*` write changed this workspace's tasks.",
+              "properties": {
+                "task_id": {
+                  "description": "The task written; absent after `task.init`.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "tasks_changed",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "workspace_id"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "tab": {
                   "$ref": "#/schemas/event/$defs/TabInfo"
@@ -739,6 +763,7 @@
             "worktree_created",
             "worktree_opened",
             "worktree_removed",
+            "tasks_changed",
             "tab_created",
             "tab_closed",
             "tab_renamed",
@@ -4351,6 +4376,18 @@
             {
               "properties": {
                 "type": {
+                  "const": "tasks.changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
                   "const": "tab.created",
                   "type": "string"
                 }
@@ -6585,6 +6622,22 @@
         {
           "properties": {
             "method": {
+              "const": "task.stamp",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TaskTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.selection.read",
               "type": "string"
             },
@@ -8007,6 +8060,30 @@
               "type": "object"
             },
             {
+              "description": "A `task.*` write changed this workspace's tasks.",
+              "properties": {
+                "task_id": {
+                  "description": "The task written; absent after `task.init`.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "tasks_changed",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "workspace_id"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "tab": {
                   "$ref": "#/schemas/success_response/$defs/TabInfo"
@@ -8430,6 +8507,7 @@
             "worktree_created",
             "worktree_opened",
             "worktree_removed",
+            "tasks_changed",
             "tab_created",
             "tab_closed",
             "tab_renamed",
@@ -10721,6 +10799,23 @@
             },
             {
               "properties": {
+                "stamp": {
+                  "description": "Changes whenever a task file or the project config changes.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "task_stamp",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "stamp"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "source": {
                   "$ref": "#/schemas/success_response/$defs/WorktreeSourceInfo"
                 },
@@ -12022,6 +12117,11 @@
           "properties": {
             "root": {
               "description": "The folder holding the Backlog.md project.",
+              "type": "string"
+            },
+            "stamp": {
+              "default": "",
+              "description": "The project's `task.stamp` when this was read.",
               "type": "string"
             },
             "statuses": {

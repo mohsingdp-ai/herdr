@@ -166,6 +166,9 @@ pub struct TaskBoardInfo {
     pub root: String,
     pub statuses: Vec<String>,
     pub tasks: Vec<TaskSummary>,
+    /// The project's `task.stamp` when this was read.
+    #[serde(default)]
+    pub stamp: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

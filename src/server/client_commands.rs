@@ -338,6 +338,10 @@ mod tests {
             actual.remove("task.init").as_deref(),
             Some("8f52d95bfa6edaa630192bf4aeef184689fd53d4ef1ac2d6b1d91a312bea0680")
         );
+        assert_eq!(
+            actual.remove("task.stamp").as_deref(),
+            Some("34fa57743b7ba986ea5d12600d196c1c9b99e00c7e6dda22ec518ed5ebd77278")
+        );
 
         assert_eq!(
             actual, expected,
