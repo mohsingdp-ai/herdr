@@ -14,6 +14,7 @@ pub(crate) mod plugins;
 pub(super) mod responses;
 mod session;
 mod tabs;
+pub(crate) mod tasks;
 mod workspaces;
 mod worktrees;
 
@@ -1126,6 +1127,17 @@ impl App {
                     request.id,
                     "invalid_request",
                     "git requests are handled asynchronously by the app runtime",
+                );
+            }
+            Method::TaskList(_)
+            | Method::TaskGet(_)
+            | Method::TaskCreate(_)
+            | Method::TaskUpdate(_)
+            | Method::TaskInit(_) => {
+                return responses::encode_error(
+                    request.id,
+                    "invalid_request",
+                    "task requests are handled asynchronously by the app runtime",
                 );
             }
             Method::WorktreeList(_) | Method::WorktreeOpen(_) => {

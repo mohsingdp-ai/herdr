@@ -20,6 +20,7 @@ use super::plugins::{
 use super::server::ServerCapabilities;
 use super::session::SessionSnapshot;
 use super::tabs::TabInfo;
+use super::tasks::{TaskBoardInfo, TaskDetail};
 use super::workspaces::{ClosedWorkspaceInfo, WorkspaceInfo};
 use super::worktrees::{WorktreeInfo, WorktreeSourceInfo};
 
@@ -93,6 +94,12 @@ pub enum ResponseResult {
     GitCommitFiles {
         commit: String,
         files: Vec<GitCommitFile>,
+    },
+    TaskList {
+        board: TaskBoardInfo,
+    },
+    TaskDetail {
+        task: TaskDetail,
     },
     WorktreeList {
         source: WorktreeSourceInfo,

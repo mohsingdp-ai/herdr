@@ -40,6 +40,7 @@ pub(super) fn command() -> Command {
         .subcommand(workspace_command())
         .subcommand(worktree_command())
         .subcommand(tab_command())
+        .subcommand(super::task::command())
         .subcommand(notification_command())
         .subcommand(agent_command())
         .subcommand(pane_command())

@@ -4671,6 +4671,233 @@
           ],
           "type": "object"
         },
+        "TaskCreateParams": {
+          "properties": {
+            "acceptance_criteria": {
+              "description": "Acceptance criteria, in order.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "assignees": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "dependencies": {
+              "description": "IDs of tasks this one depends on.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "labels": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "pane_id": {
+              "description": "A pane whose workspace's tasks to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "priority": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "description": "One of the project's statuses. Defaults to the project's default status.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose tasks to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "type": "object"
+        },
+        "TaskGetParams": {
+          "properties": {
+            "id": {
+              "description": "Task ID, such as `TASK-12`.",
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "A pane whose workspace's tasks to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose tasks to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "TaskTarget": {
+          "description": "The space whose tasks to use: a workspace, a pane's workspace, or\n(with neither) the focused pane's workspace.",
+          "properties": {
+            "pane_id": {
+              "description": "A pane whose workspace's tasks to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose tasks to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "TaskUpdateParams": {
+          "description": "Changes one task. Only the given fields change.",
+          "properties": {
+            "assignees": {
+              "description": "Replaces every assignee; an empty list clears them.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "check_ac": {
+              "description": "Acceptance criteria to tick, by 1-based index.",
+              "items": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "comment": {
+              "description": "A comment to append.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "comment_author": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fingerprint": {
+              "description": "The task's `fingerprint` as last read. When given and the task\nchanged since, nothing is written and the error is `task_conflict`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "description": "Task ID, such as `TASK-12`.",
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "A pane whose workspace's tasks to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "priority": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "uncheck_ac": {
+              "description": "Acceptance criteria to untick, by 1-based index.",
+              "items": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "workspace_id": {
+              "description": "The workspace whose tasks to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
         "ToastHerdrPosition": {
           "enum": [
             "top-left",
@@ -6267,6 +6494,86 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/GitTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "task.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TaskTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "task.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TaskGetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "task.create",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TaskCreateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "task.update",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TaskUpdateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "task.init",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TaskTarget"
             }
           },
           "required": [
@@ -10382,6 +10689,38 @@
             },
             {
               "properties": {
+                "board": {
+                  "$ref": "#/schemas/success_response/$defs/TaskBoardInfo"
+                },
+                "type": {
+                  "const": "task_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "board"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "task": {
+                  "$ref": "#/schemas/success_response/$defs/TaskDetail"
+                },
+                "type": {
+                  "const": "task_detail",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "task"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "source": {
                   "$ref": "#/schemas/success_response/$defs/WorktreeSourceInfo"
                 },
@@ -11675,6 +12014,261 @@
             "focused",
             "pane_count",
             "agent_status"
+          ],
+          "type": "object"
+        },
+        "TaskBoardInfo": {
+          "description": "A space's Backlog.md project: its statuses (the board's columns, in\norder) and every task.",
+          "properties": {
+            "root": {
+              "description": "The folder holding the Backlog.md project.",
+              "type": "string"
+            },
+            "statuses": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "tasks": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/TaskSummary"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "root",
+            "statuses",
+            "tasks"
+          ],
+          "type": "object"
+        },
+        "TaskCheckItem": {
+          "properties": {
+            "checked": {
+              "type": "boolean"
+            },
+            "index": {
+              "description": "1-based, as `check_ac` and `uncheck_ac` take it.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "index",
+            "text",
+            "checked"
+          ],
+          "type": "object"
+        },
+        "TaskComment": {
+          "properties": {
+            "author": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "body": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        },
+        "TaskDetail": {
+          "properties": {
+            "acceptance_criteria": {
+              "default": [],
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/TaskCheckItem"
+              },
+              "type": "array"
+            },
+            "acceptance_criteria_checked": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "acceptance_criteria_total": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "assignees": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "comments": {
+              "default": [],
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/TaskComment"
+              },
+              "type": "array"
+            },
+            "dependencies": {
+              "default": [],
+              "description": "IDs of tasks this one depends on.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "final_summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fingerprint": {
+              "description": "Changes whenever the task's file changes; pass it back to `task.update`\nto refuse writing over a change made since.",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "implementation_notes": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "implementation_plan": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "labels": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "path": {
+              "description": "The task file, relative to `root`.",
+              "type": "string"
+            },
+            "priority": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "status",
+            "fingerprint",
+            "path"
+          ],
+          "type": "object"
+        },
+        "TaskSummary": {
+          "properties": {
+            "acceptance_criteria_checked": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "acceptance_criteria_total": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "assignees": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "dependencies": {
+              "default": [],
+              "description": "IDs of tasks this one depends on.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "fingerprint": {
+              "description": "Changes whenever the task's file changes; pass it back to `task.update`\nto refuse writing over a change made since.",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "labels": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "priority": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "status",
+            "fingerprint"
           ],
           "type": "object"
         },

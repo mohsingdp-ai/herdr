@@ -3055,6 +3055,11 @@ impl HeadlessServer {
                 .handle_deferred_git_api_request(msg.request, msg.respond_to);
             return changed;
         }
+        if crate::app::is_task_method(&msg.request.method) {
+            self.app
+                .handle_deferred_task_api_request(msg.request, msg.respond_to);
+            return changed;
+        }
         if matches!(
             &msg.request.method,
             api::schema::Method::WorktreeCreate(_)

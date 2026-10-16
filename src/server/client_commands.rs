@@ -318,6 +318,26 @@ mod tests {
             actual.remove("git.pull").as_deref(),
             Some("49f43a2b00ea01074023471d2ef30e08141a77545f9ed56c2e1f706f6b232405")
         );
+        assert_eq!(
+            actual.remove("task.list").as_deref(),
+            Some("4737d76b6a6c83f6903c665eb0e9411aeb17cdfa339361231dafe66ebe6f0ae7")
+        );
+        assert_eq!(
+            actual.remove("task.get").as_deref(),
+            Some("098a23291b97750653b204b9691558ddfa94a87f725aca72e1aaaaf8d0db9bef")
+        );
+        assert_eq!(
+            actual.remove("task.create").as_deref(),
+            Some("12fbe69a8ba80410f5ee0d85b4fcd7adc8d072e8d950678a919c7bf16724f789")
+        );
+        assert_eq!(
+            actual.remove("task.update").as_deref(),
+            Some("bc9ce7e0f829d917709953077d4a6ad6d4c48eec6f9d2051480a38640f0b7e2b")
+        );
+        assert_eq!(
+            actual.remove("task.init").as_deref(),
+            Some("8f52d95bfa6edaa630192bf4aeef184689fd53d4ef1ac2d6b1d91a312bea0680")
+        );
 
         assert_eq!(
             actual, expected,

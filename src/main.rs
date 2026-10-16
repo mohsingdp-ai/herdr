@@ -55,6 +55,7 @@ mod server;
 mod session;
 mod sound;
 mod source_control;
+mod tasks;
 mod terminal;
 mod terminal_effects;
 mod terminal_modes;
@@ -634,6 +635,7 @@ fn main() -> io::Result<()> {
         println!("       herdr workspace <subcommand> ...");
         println!("       herdr worktree <subcommand> ...");
         println!("       herdr tab <subcommand> ...");
+        println!("       herdr task <subcommand> ...");
         println!("       herdr notification <subcommand> ...");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
@@ -683,6 +685,10 @@ fn main() -> io::Result<()> {
                 "Git worktree helpers over the socket API",
             ),
             ("herdr tab <subcommand>", "Tab helpers over the socket API"),
+            (
+                "herdr task <subcommand>",
+                "Backlog.md task helpers over the socket API",
+            ),
             (
                 "herdr notification <subcommand>",
                 "Notification helpers over the socket API",

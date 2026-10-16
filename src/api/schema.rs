@@ -14,6 +14,7 @@ pub mod response;
 pub mod server;
 pub mod session;
 pub mod tabs;
+pub mod tasks;
 pub mod workspaces;
 pub mod worktrees;
 
@@ -30,6 +31,7 @@ pub use response::*;
 pub use server::*;
 pub use session::*;
 pub use tabs::*;
+pub use tasks::*;
 pub use workspaces::*;
 pub use worktrees::*;
 
@@ -126,6 +128,11 @@ operations::define_operations! {
     GitUncommit(GitUncommitParams) => "git.uncommit", false, true;
     GitPush(GitTarget) => "git.push", false, true;
     GitPull(GitTarget) => "git.pull", false, true;
+    TaskList(TaskTarget) => "task.list", false, true;
+    TaskGet(TaskGetParams) => "task.get", false, true;
+    TaskCreate(TaskCreateParams) => "task.create", false, true;
+    TaskUpdate(TaskUpdateParams) => "task.update", false, true;
+    TaskInit(TaskTarget) => "task.init", false, true;
     PaneSelectionRead(PaneSelectionReadParams) => "pane.selection.read", false, true;
     PaneCopyMotion(PaneCopyMotionParams) => "pane.copy_motion", false, true;
     PaneCopySearch(PaneCopySearchParams) => "pane.copy_search", false, true;

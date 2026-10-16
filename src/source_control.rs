@@ -1287,16 +1287,20 @@ fn run_text(command: &mut Command) -> Result<String> {
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-/// Runs git in its own process group with stdin fed and stdout/stderr read on
-/// helper threads (so no pipe can fill up and stall it), stopping the whole
-/// group after `timeout`. Stdout past `cap` is not read: git ends on the
-/// closed pipe. Stderr is always drained, since hooks write there.
-fn run_raw(
+/// Runs git (or another tool, such as `backlog`) in its own process group
+/// with stdin fed and stdout/stderr read on helper threads (so no pipe can
+/// fill up and stall it), stopping the whole group after `timeout`. Stdout
+/// past `cap` is not read: the tool ends on the closed pipe. Stderr is always
+/// drained, since hooks write there.
+pub(crate) fn run_raw(
     command: &mut Command,
     input: Option<&[u8]>,
     timeout: Duration,
     cap: usize,
 ) -> Result<(ExitStatus, Vec<u8>, bool, Vec<u8>)> {
+    let program = Path::new(command.get_program())
+        .file_stem()
+        .map_or_else(|| "git".into(), |name| name.to_string_lossy().into_owned());
     crate::platform::isolate_process_tree(command);
     let mut child = command
         .stdin(if input.is_some() {
@@ -1307,8 +1311,8 @@ fn run_raw(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|err| GitError::Failed(format!("could not run git: {err}")))?;
-    let failed = |err: io::Error| GitError::Failed(format!("could not run git: {err}"));
+        .map_err(|err| GitError::Failed(format!("could not run {program}: {err}")))?;
+    let failed = |err: io::Error| GitError::Failed(format!("could not run {program}: {err}"));
     if let (Some(mut stdin), Some(input)) = (child.stdin.take(), input) {
         let input = input.to_vec();
         crate::thread_spawn::spawn_named("herdr-git-stdin", move || {
@@ -1319,8 +1323,8 @@ fn run_raw(
     }
     let stdout = read_pipe(child.stdout.take(), cap, false).map_err(failed)?;
     let stderr = read_pipe(child.stderr.take(), MAX_STDERR_BYTES, true).map_err(failed)?;
-    let status =
-        wait_with_timeout(&mut child, timeout).map_err(|err| GitError::Failed(err.to_string()))?;
+    let status = wait_with_timeout(&mut child, timeout)
+        .map_err(|err| GitError::Failed(format!("{program} {err}")))?;
     let (stdout, truncated) = stdout.recv_timeout(PIPE_GRACE).unwrap_or_default();
     let (stderr, _) = stderr.recv_timeout(PIPE_GRACE).unwrap_or_default();
     Ok((status, stdout, truncated, stderr))
@@ -1357,7 +1361,7 @@ fn wait_with_timeout(child: &mut std::process::Child, timeout: Duration) -> io::
         if Instant::now() >= deadline {
             crate::platform::stop_process_tree(child, STOP_GRACE);
             return Err(io::Error::other(format!(
-                "git took longer than {}s and was stopped",
+                "took longer than {}s and was stopped",
                 timeout.as_secs()
             )));
         }

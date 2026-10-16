@@ -35,6 +35,7 @@ mod spec;
 mod status;
 pub(crate) mod tab;
 mod target;
+pub(crate) mod task;
 mod title;
 mod workspace;
 pub(crate) mod workspace_bindings;
@@ -129,6 +130,7 @@ pub fn maybe_run(args: &[String]) -> std::io::Result<CommandOutcome> {
         "workspace" => workspace::run_workspace_command(&args[2..])?,
         "worktree" => worktree::run_worktree_command(&args[2..])?,
         "tab" => tab::run_tab_command(&args[2..])?,
+        "task" => task::run_task_command(&args[2..])?,
         "notification" => notification::run_notification_command(&args[2..])?,
         "agent" => agent::run_agent_command(&args[2..])?,
         "terminal" => run_terminal_command(&args[2..])?,
@@ -148,6 +150,7 @@ fn api_group(name: &str) -> Option<clap::Command> {
         "workspace" => workspace_bindings::command(),
         "worktree" => worktree::command(),
         "tab" => tab::command(),
+        "task" => task::command(),
         "notification" => notification::command(),
         "agent" => agent::command(),
         "pane" => pane::command(),
