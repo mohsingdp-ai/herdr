@@ -65,6 +65,35 @@ pub(super) enum BoardRequest {
         status: String,
         title: String,
     },
+    /// An edit already shown; failing puts `before` back.
+    Edit {
+        id: String,
+        before: Box<TaskSnapshot>,
+    },
+}
+
+/// A task as shown before an edit, to put back if the save fails.
+#[derive(Debug)]
+pub(super) struct TaskSnapshot {
+    summary: TaskSummary,
+    detail: Option<TaskDetail>,
+}
+
+/// A details field edited as text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BoardField {
+    Title,
+    Description,
+    Assignee,
+    Type,
+    Comment,
+}
+
+#[derive(Debug)]
+pub(super) struct BoardEditing {
+    pub(super) id: String,
+    pub(super) field: BoardField,
+    pub(super) text: TextEditor,
 }
 
 /// A card or row held by the mouse.
@@ -126,6 +155,10 @@ pub(super) struct ClientBoardView {
     /// Moves on their way to the server, by task: shown already, kept over older lists.
     pub(super) pending_moves: HashMap<String, String>,
     pub(super) draft: Option<BoardDraft>,
+    /// A details field being typed into.
+    pub(super) editing: Option<BoardEditing>,
+    /// Tasks with an edit on its way; the next waits for its new fingerprint.
+    pub(super) saving: HashSet<String>,
     /// The list should be read again.
     list_stale: bool,
     list_in_flight: bool,
@@ -181,6 +214,8 @@ impl ClientBoardView {
             drag: None,
             pending_moves: HashMap::new(),
             draft: None,
+            editing: None,
+            saving: HashSet::new(),
             list_stale: true,
             list_in_flight: false,
             get_in_flight: None,
@@ -375,6 +410,27 @@ impl ClientBoardView {
         self.detail = Some(task);
     }
 
+    /// A move or edit of `id` is on its way.
+    pub(super) fn is_busy(&self, id: &str) -> bool {
+        self.pending_moves.contains_key(id) || self.saving.contains(id)
+    }
+
+    /// Puts a refused edit back and says why.
+    fn restore(&mut self, before: TaskSnapshot, reason: String) {
+        let id = before.summary.id.clone();
+        if let Some(summary) = self
+            .board
+            .as_mut()
+            .and_then(|board| board.tasks.iter_mut().find(|task| task.id == id))
+        {
+            *summary = before.summary;
+        }
+        if before.detail.is_some() {
+            self.detail = before.detail;
+        }
+        self.message = Some(format!("{id} was not saved: {reason}"));
+    }
+
     /// Puts a refused move back and says why.
     fn undo_move(&mut self, id: &str, from: &str, reason: String) {
         if let Some(task) = self
@@ -400,6 +456,19 @@ fn id_number(id: &str) -> u64 {
         .next()
         .and_then(|number| number.parse().ok())
         .unwrap_or(u64::MAX)
+}
+
+/// Who a comment from the Board is by: the person at this computer.
+fn comment_author() -> String {
+    let name = ["USER", "USERNAME"]
+        .iter()
+        .find_map(|key| {
+            std::env::var(key)
+                .ok()
+                .filter(|name| !name.trim().is_empty())
+        })
+        .unwrap_or_else(|| "you".to_owned());
+    format!("@{}", name.trim())
 }
 
 pub(super) fn priority_rank(priority: Option<&str>) -> u8 {
@@ -738,6 +807,19 @@ impl ClientShellState {
             return;
         };
         let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
+        if let Some(editing) = view.editing.as_mut() {
+            match code {
+                KeyCode::Esc => view.editing = None,
+                KeyCode::Enter => self.commit_board_edit(outcome),
+                _ => {
+                    if editing.text.handle_key(key).is_none() {
+                        return;
+                    }
+                }
+            }
+            outcome.repaint = true;
+            return;
+        }
         if let Some(draft) = view.draft.as_mut() {
             match code {
                 KeyCode::Esc => view.draft = None,
@@ -792,6 +874,11 @@ impl ClientShellState {
                 }
             }
             KeyCode::Char('r') => self.refresh_board_view(outcome),
+            KeyCode::Char('n') => {
+                if let Some(status) = view.statuses().first().cloned() {
+                    self.start_board_draft(status, outcome);
+                }
+            }
             _ => {}
         }
     }
@@ -817,6 +904,9 @@ impl ClientShellState {
         let Some(view) = self.board_view.as_mut() else {
             return false;
         };
+        if let Some(editing) = view.editing.as_mut() {
+            return editing.text.insert(text);
+        }
         if let Some(draft) = view.draft.as_mut() {
             // A title is one line.
             return draft.title.insert(&text.replace(['\r', '\n'], " "));
@@ -829,9 +919,9 @@ impl ClientShellState {
     }
 
     pub(super) fn board_view_text_field_focused(&self) -> bool {
-        self.board_view
-            .as_ref()
-            .is_some_and(|view| view.search_focused || view.draft.is_some())
+        self.board_view.as_ref().is_some_and(|view| {
+            view.search_focused || view.draft.is_some() || view.editing.is_some()
+        })
     }
 
     /// Starts naming a new task in `status`.
@@ -878,12 +968,218 @@ impl ClientShellState {
         self.send_board_request(method, generation, request, outcome);
     }
 
+    /// Starts typing into a details field of the selected task.
+    fn start_board_edit(&mut self, field: BoardField, outcome: &mut ClientShellInput) {
+        let Some(view) = self.board_view.as_mut() else {
+            return;
+        };
+        let Some(task) = view.selected_task() else {
+            return;
+        };
+        let text = match field {
+            BoardField::Title => task.title.clone(),
+            BoardField::Assignee => task.assignees.join(", "),
+            BoardField::Type => task.task_type.clone().unwrap_or_default(),
+            BoardField::Comment => String::new(),
+            BoardField::Description => {
+                let Some(detail) = view.shown_detail() else {
+                    return;
+                };
+                let text = detail.description.clone().unwrap_or_default();
+                // ponytail: the field is one line; multi-line text would lose its breaks.
+                if text.trim().contains('\n') {
+                    view.message =
+                        Some("a description with several lines is edited in the task file".into());
+                    outcome.repaint = true;
+                    return;
+                }
+                text
+            }
+        };
+        let id = task.id.clone();
+        view.search_focused = false;
+        view.editing = Some(BoardEditing {
+            id,
+            field,
+            text: TextEditor::from(text.trim()),
+        });
+        view.message = None;
+        outcome.repaint = true;
+    }
+
+    /// Saves the field being typed into, when it changed.
+    fn commit_board_edit(&mut self, outcome: &mut ClientShellInput) {
+        let Some(editing) = self
+            .board_view
+            .as_mut()
+            .and_then(|view| view.editing.take())
+        else {
+            return;
+        };
+        outcome.repaint = true;
+        let Some(task) = self
+            .board_view
+            .as_ref()
+            .and_then(|view| view.task(&editing.id))
+            .cloned()
+        else {
+            return;
+        };
+        let text = editing.text.as_str().trim().to_owned();
+        let id = editing.id;
+        match editing.field {
+            BoardField::Title if !text.is_empty() && text != task.title => {
+                let value = text.clone();
+                self.edit_board_task(
+                    &id,
+                    |params| params.title = Some(value),
+                    move |summary, _| summary.title = text,
+                    outcome,
+                );
+            }
+            BoardField::Description => {
+                let current = self
+                    .board_view
+                    .as_ref()
+                    .and_then(|view| view.shown_detail())
+                    .and_then(|detail| detail.description.clone())
+                    .unwrap_or_default();
+                if text != current.trim() {
+                    let value = text.clone();
+                    self.edit_board_task(
+                        &id,
+                        |params| params.description = Some(value),
+                        move |_, detail| {
+                            if let Some(detail) = detail {
+                                detail.description = Some(text);
+                            }
+                        },
+                        outcome,
+                    );
+                }
+            }
+            BoardField::Assignee => {
+                let assignees: Vec<String> = text
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(|name| {
+                        if name.starts_with('@') {
+                            name.to_owned()
+                        } else {
+                            format!("@{name}")
+                        }
+                    })
+                    .collect();
+                if assignees != task.assignees {
+                    let value = assignees.clone();
+                    self.edit_board_task(
+                        &id,
+                        |params| params.assignees = Some(value),
+                        move |summary, _| summary.assignees = assignees,
+                        outcome,
+                    );
+                }
+            }
+            BoardField::Type if !text.is_empty() && Some(&text) != task.task_type.as_ref() => {
+                let value = text.clone();
+                self.edit_board_task(
+                    &id,
+                    |params| params.task_type = Some(value),
+                    move |summary, _| summary.task_type = Some(text),
+                    outcome,
+                );
+            }
+            BoardField::Comment if !text.is_empty() => {
+                let author = comment_author();
+                let (body, value_author) = (text.clone(), author.clone());
+                self.edit_board_task(
+                    &id,
+                    |params| {
+                        params.comment = Some(body);
+                        params.comment_author = Some(value_author);
+                    },
+                    move |_, detail| {
+                        if let Some(detail) = detail {
+                            detail.comments.push(crate::api::schema::TaskComment {
+                                author: Some(author),
+                                created_at: None,
+                                body: text,
+                            });
+                        }
+                    },
+                    outcome,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// Shows an edit at once and saves it with the fingerprint on screen;
+    /// a refusal puts the task back as it was.
+    fn edit_board_task(
+        &mut self,
+        id: &str,
+        params: impl FnOnce(&mut crate::api::schema::TaskUpdateParams),
+        show: impl FnOnce(&mut TaskSummary, Option<&mut TaskDetail>),
+        outcome: &mut ClientShellInput,
+    ) {
+        let Some(view) = self.board_view.as_mut() else {
+            return;
+        };
+        outcome.repaint = true;
+        if view.is_busy(id) {
+            view.message = Some(format!("{id} is still saving"));
+            return;
+        }
+        let Some(summary) = view.task(id).cloned() else {
+            return;
+        };
+        let detail = view.detail.clone().filter(|detail| detail.summary.id == id);
+        let mut update = crate::api::schema::TaskUpdateParams {
+            workspace_id: Some(view.workspace_id.clone()),
+            id: id.to_owned(),
+            fingerprint: Some(summary.fingerprint.clone()),
+            ..crate::api::schema::TaskUpdateParams::default()
+        };
+        params(&mut update);
+        let before = Box::new(TaskSnapshot { summary, detail });
+        let shown_detail = view
+            .detail
+            .as_mut()
+            .filter(|detail| detail.summary.id == id);
+        if let Some(summary) = view
+            .board
+            .as_mut()
+            .and_then(|board| board.tasks.iter_mut().find(|task| task.id == id))
+        {
+            show(summary, shown_detail);
+            if let Some(detail) = view
+                .detail
+                .as_mut()
+                .filter(|detail| detail.summary.id == id)
+            {
+                detail.summary = summary.clone();
+            }
+        }
+        view.saving.insert(id.to_owned());
+        view.message = None;
+        let generation = view.generation;
+        let request = BoardRequest::Edit {
+            id: id.to_owned(),
+            before,
+        };
+        self.send_board_request(Method::TaskUpdate(update), generation, request, outcome);
+    }
+
     /// Shows `id` in `to` at once and saves it; a refusal puts it back.
     pub(super) fn move_board_task(&mut self, id: &str, to: &str, outcome: &mut ClientShellInput) {
         let Some(view) = self.board_view.as_mut() else {
             return;
         };
-        if view.pending_moves.contains_key(id) {
+        if view.is_busy(id) {
+            view.message = Some(format!("{id} is still saving"));
+            outcome.repaint = true;
             return;
         }
         let Some(task) = view
@@ -1001,6 +1297,15 @@ impl ClientShellState {
                     // Clicking away keeps a typed title as a new task.
                     self.commit_board_draft(outcome);
                 }
+                if self
+                    .board_view
+                    .as_ref()
+                    .is_some_and(|view| view.editing.is_some())
+                    && !matches!(target, Some(BoardTarget::Editing))
+                {
+                    // Clicking away saves what was typed, as leaving a field does.
+                    self.commit_board_edit(outcome);
+                }
                 if let Some(BoardTarget::Card(id)) = target {
                     if let Some(view) = self.board_view.as_mut() {
                         view.drag = Some(BoardDrag {
@@ -1028,7 +1333,78 @@ impl ClientShellState {
             BoardTarget::Mode(mode) => self.set_board_mode(mode, outcome),
             BoardTarget::Task(id) | BoardTarget::Card(id) => self.select_board_task(id, outcome),
             BoardTarget::NewTask(status) => self.start_board_draft(status, outcome),
-            BoardTarget::Nothing | BoardTarget::Draft => {}
+            BoardTarget::Nothing | BoardTarget::Draft | BoardTarget::Editing => {}
+            BoardTarget::Field(field) => self.start_board_edit(field, outcome),
+            BoardTarget::CycleStatus => {
+                let next = self.board_view.as_ref().and_then(|view| {
+                    let task = view.selected_task()?;
+                    let statuses = view.statuses();
+                    let index = statuses.iter().position(|status| *status == task.status);
+                    let next = index.map_or(0, |index| (index + 1) % statuses.len());
+                    Some((task.id.clone(), statuses.get(next)?.clone()))
+                });
+                if let Some((id, status)) = next {
+                    self.move_board_task(&id, &status, outcome);
+                }
+            }
+            BoardTarget::CyclePriority => {
+                let next = self.board_view.as_ref().and_then(|view| {
+                    let task = view.selected_task()?;
+                    let index = task
+                        .priority
+                        .as_deref()
+                        .and_then(|priority| PRIORITIES.iter().position(|p| *p == priority));
+                    let next = PRIORITIES[index.map_or(0, |index| (index + 1) % PRIORITIES.len())];
+                    Some((task.id.clone(), next.to_owned()))
+                });
+                if let Some((id, priority)) = next {
+                    let value = priority.clone();
+                    self.edit_board_task(
+                        &id,
+                        |params| params.priority = Some(value),
+                        move |summary, _| summary.priority = Some(priority),
+                        outcome,
+                    );
+                }
+            }
+            BoardTarget::ToggleAc(index) => {
+                let Some((id, checked)) = self.board_view.as_ref().and_then(|view| {
+                    let detail = view.shown_detail()?;
+                    let item = detail
+                        .acceptance_criteria
+                        .iter()
+                        .find(|item| item.index == index)?;
+                    Some((detail.summary.id.clone(), item.checked))
+                }) else {
+                    return;
+                };
+                self.edit_board_task(
+                    &id,
+                    |params| {
+                        if checked {
+                            params.uncheck_ac = vec![index];
+                        } else {
+                            params.check_ac = vec![index];
+                        }
+                    },
+                    move |summary, detail| {
+                        if let Some(item) = detail.and_then(|detail| {
+                            detail
+                                .acceptance_criteria
+                                .iter_mut()
+                                .find(|item| item.index == index)
+                        }) {
+                            item.checked = !checked;
+                        }
+                        summary.acceptance_criteria_checked = if checked {
+                            summary.acceptance_criteria_checked.saturating_sub(1)
+                        } else {
+                            summary.acceptance_criteria_checked + 1
+                        };
+                    },
+                    outcome,
+                );
+            }
             target => {
                 let Some(view) = self.board_view.as_mut() else {
                     return;
@@ -1207,6 +1583,27 @@ impl ClientShellState {
                     }
                 }
             }
+            BoardRequest::Edit { id, before } => {
+                view.saving.remove(&id);
+                match result {
+                    Ok(ResponseResult::TaskDetail { task }) => view.apply_saved(task),
+                    Ok(_) => view.restore(*before, "unexpected answer from the server".into()),
+                    Err(error) => {
+                        let conflict = error.code.as_deref() == Some("task_conflict");
+                        let reason = if conflict {
+                            "it changed since the Board loaded it · reloaded".to_owned()
+                        } else {
+                            error.message
+                        };
+                        view.restore(*before, reason);
+                        if conflict {
+                            view.list_stale = true;
+                            // The details are read again with the new list's fingerprint.
+                            view.detail = None;
+                        }
+                    }
+                }
+            }
             BoardRequest::Create { status, title } => match result {
                 Ok(ResponseResult::TaskDetail { task }) => {
                     let id = task.summary.id.clone();
@@ -1252,6 +1649,16 @@ pub(super) enum BoardTarget {
     NewTask(String),
     /// The new task's title field.
     Draft,
+    /// The details field being typed into.
+    Editing,
+    /// A details value edited as text.
+    Field(BoardField),
+    /// The details' status: a click moves the task to the next status.
+    CycleStatus,
+    /// The details' priority: a click sets the next one.
+    CyclePriority,
+    /// An acceptance criterion, by its 1-based index: a click ticks or unticks it.
+    ToggleAc(u32),
     CloseDetails,
     /// Takes a click so nothing under it does.
     Nothing,

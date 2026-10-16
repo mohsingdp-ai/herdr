@@ -499,3 +499,157 @@ fn a_column_plus_names_and_creates_a_task_there() {
     assert_eq!(view.selected.as_deref(), Some("TASK-3"));
     assert!(screen(&mut state, 150).contains(" Review  1 "));
 }
+
+/// The list with TASK-2's details open and loaded.
+fn details_open() -> ClientShellState {
+    let mut state = loaded();
+    screen(&mut state, 150);
+    let row = target(&state, &BoardTarget::Card("TASK-2".into()));
+    let get = requests(click_card(&mut state, row).actions);
+    answer(&mut state, &get[0], Ok(detail("TASK-2")));
+    screen(&mut state, 150);
+    state
+}
+
+fn update_params(
+    requests: &[crate::api::schema::Request],
+) -> &crate::api::schema::TaskUpdateParams {
+    requests
+        .iter()
+        .find_map(|request| match &request.method {
+            Method::TaskUpdate(params) => Some(params),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no update in {requests:?}"))
+}
+
+#[test]
+fn editing_the_title_shows_at_once_and_comes_back_when_refused() {
+    let mut state = details_open();
+    let title = target(
+        &state,
+        &BoardTarget::Field(crate::client::shell::board_view::BoardField::Title),
+    );
+    click(&mut state, title);
+    state.handle_input_bytes(b" v2");
+    let sent = requests(state.handle_input_bytes(b"\r").actions);
+    let params = update_params(&sent);
+    assert_eq!(params.title.as_deref(), Some("Build the login form v2"));
+    assert_eq!(params.fingerprint.as_deref(), Some("fp-TASK-2"));
+    assert!(screen(&mut state, 150).contains("Build the login form v2"));
+
+    // A second edit waits for the first one's new fingerprint.
+    let priority = target(&state, &BoardTarget::CyclePriority);
+    assert!(requests(click(&mut state, priority).actions).is_empty());
+    assert!(screen(&mut state, 150).contains("TASK-2 is still saving"));
+
+    answer(
+        &mut state,
+        &sent[0],
+        Err(ClientShellEndpointError {
+            code: Some("invalid_request".into()),
+            message: "title refused".into(),
+        }),
+    );
+    let text = screen(&mut state, 150);
+    assert!(!text.contains("login form v2"), "{text}");
+    assert!(
+        text.contains("TASK-2 was not saved: title refused"),
+        "{text}"
+    );
+}
+
+#[test]
+fn details_fields_tick_cycle_and_comment() {
+    let mut state = details_open();
+    let tick = target(&state, &BoardTarget::ToggleAc(1));
+    let sent = requests(click(&mut state, tick).actions);
+    assert_eq!(update_params(&sent).check_ac, vec![1]);
+    assert!(screen(&mut state, 150).contains("[x] Form posts credentials"));
+    answer(&mut state, &sent[0], Ok(detail("TASK-2")));
+
+    let priority = target(&state, &BoardTarget::CyclePriority);
+    let sent = requests(click(&mut state, priority).actions);
+    assert_eq!(update_params(&sent).priority.as_deref(), Some("medium"));
+    answer(&mut state, &sent[0], Ok(detail("TASK-2")));
+
+    screen(&mut state, 150);
+    let status = target(&state, &BoardTarget::CycleStatus);
+    let sent = requests(click(&mut state, status).actions);
+    assert_eq!(update_params(&sent).status.as_deref(), Some("Review"));
+    answer(&mut state, &sent[0], Ok(detail("TASK-2")));
+
+    screen(&mut state, 150);
+    let assignee = target(
+        &state,
+        &BoardTarget::Field(crate::client::shell::board_view::BoardField::Assignee),
+    );
+    click(&mut state, assignee);
+    // Ctrl+U clears the field; names get their @.
+    state.handle_input_bytes(b"\x15tester, @qa");
+    let sent = requests(state.handle_input_bytes(b"\r").actions);
+    assert_eq!(
+        update_params(&sent).assignees,
+        Some(vec!["@tester".to_owned(), "@qa".to_owned()])
+    );
+    answer(&mut state, &sent[0], Ok(detail("TASK-2")));
+
+    screen(&mut state, 150);
+    let comment = target(
+        &state,
+        &BoardTarget::Field(crate::client::shell::board_view::BoardField::Comment),
+    );
+    click(&mut state, comment);
+    state.handle_input_bytes(b"Ready for review");
+    let sent = requests(state.handle_input_bytes(b"\r").actions);
+    let params = update_params(&sent);
+    assert_eq!(params.comment.as_deref(), Some("Ready for review"));
+    assert!(params
+        .comment_author
+        .as_deref()
+        .is_some_and(|author| author.starts_with('@')));
+    assert!(screen(&mut state, 150).contains("Ready for review"));
+}
+
+#[test]
+fn new_task_button_and_n_key_start_a_draft_in_the_first_status() {
+    let mut state = loaded();
+    screen(&mut state, 150);
+    assert!(screen(&mut state, 150).contains(" + New task "));
+    state.handle_input_bytes(b"n");
+    let draft = state
+        .board_view
+        .as_ref()
+        .and_then(|view| view.draft.as_ref())
+        .map(|draft| draft.status.clone());
+    assert_eq!(draft.as_deref(), Some("To Do"));
+    state.handle_input_bytes(b"\x1b");
+    assert!(state
+        .board_view
+        .as_ref()
+        .is_some_and(|view| view.draft.is_none()));
+}
+
+#[test]
+fn a_multi_line_description_is_not_flattened() {
+    let mut state = loaded();
+    screen(&mut state, 150);
+    let row = target(&state, &BoardTarget::Card("TASK-2".into()));
+    let get = requests(click_card(&mut state, row).actions);
+    let ResponseResult::TaskDetail { mut task } = detail("TASK-2") else {
+        unreachable!()
+    };
+    task.description = Some("line one\nline two".into());
+    answer(&mut state, &get[0], Ok(ResponseResult::TaskDetail { task }));
+    screen(&mut state, 150);
+    let description = target(
+        &state,
+        &BoardTarget::Field(crate::client::shell::board_view::BoardField::Description),
+    );
+    assert!(requests(click(&mut state, description).actions).is_empty());
+    assert!(state
+        .board_view
+        .as_ref()
+        .is_some_and(|view| view.editing.is_none()));
+    assert!(screen(&mut state, 150).contains("edited in the task file"));
+}

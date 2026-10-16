@@ -5,8 +5,8 @@
 use ratatui::style::Color;
 
 use super::board_view::{
-    BoardFilter, BoardLoad, BoardMode, BoardRow, BoardSortKey, BoardTarget, BoardViewHits,
-    ClientBoardView,
+    BoardField, BoardFilter, BoardLoad, BoardMode, BoardRow, BoardSortKey, BoardTarget,
+    BoardViewHits, ClientBoardView,
 };
 use super::git_view_render::{fit, wrap};
 use super::render::{display_width, put_segment, put_text};
@@ -373,7 +373,8 @@ pub(super) fn render_board_view(
     }
     render_hint(buffer, &geometry, view, &styles);
     if view.load == BoardLoad::Ready {
-        render_details(buffer, &geometry, view, &styles, &mut frame.hits);
+        let details_cursor = render_details(buffer, &geometry, view, &styles, &mut frame.hits);
+        frame.cursor = details_cursor.or(frame.cursor);
         render_held_card(buffer, area, view, &styles);
     }
     frame
@@ -591,7 +592,7 @@ fn render_card(
     );
     // The longest note that fits beside the ID.
     let room = inner.width.saturating_sub(display_width(&task.id) + 1);
-    let notes: Vec<String> = if view.pending_moves.contains_key(&task.id) {
+    let notes: Vec<String> = if view.is_busy(&task.id) {
         vec!["saving…".to_owned(), "↻".to_owned()]
     } else if task.acceptance_criteria_total > 0 {
         vec![format!(
@@ -762,6 +763,19 @@ fn render_toolbar(
     let left_end = x + 1;
     let wide = row.width >= WIDE_TOOLBAR;
     let mut right = row.right();
+    if let Some(first) = view.statuses().first() {
+        let label = " + New task ";
+        let width = display_width(label);
+        if right > left_end + width {
+            right -= width;
+            put_text(buffer, right, row.y, width, label, styles.primary);
+            hits.targets.push((
+                Rect::new(right, row.y, width, 1),
+                BoardTarget::NewTask(first.clone()),
+            ));
+            right -= 1;
+        }
+    }
     for (name, filter) in [
         ("status", BoardFilter::Status),
         ("priority", BoardFilter::Priority),
@@ -1255,7 +1269,7 @@ fn render_hint(
     let (text, style) = match view.message.as_deref() {
         Some(message) if view.load == BoardLoad::Ready => (message, styles.red),
         _ => (
-            "click a task to open · / search · ↑↓ move · r reload · esc close",
+            "click a task to open · drag to move · / search · n new · r reload · esc close",
             styles.dim,
         ),
     };
@@ -1273,6 +1287,8 @@ fn render_hint(
 struct DetailLine {
     spans: Vec<(String, Style)>,
     target: Option<BoardTarget>,
+    /// The field being typed into follows the spans on this line.
+    input: bool,
 }
 
 impl DetailLine {
@@ -1280,6 +1296,21 @@ impl DetailLine {
         Self {
             spans,
             target: None,
+            input: false,
+        }
+    }
+
+    fn on_click(mut self, target: BoardTarget) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    /// `prefix` then the field being typed into.
+    fn input(prefix: Vec<(String, Style)>) -> Self {
+        Self {
+            spans: prefix,
+            target: Some(BoardTarget::Editing),
+            input: true,
         }
     }
 
@@ -1297,9 +1328,30 @@ fn detail_lines(view: &ClientBoardView, width: u16, styles: &Styles) -> Vec<Deta
         return Vec::new();
     };
     let detail = view.shown_detail();
-    let mut lines = vec![DetailLine::text(task.id.clone(), styles.muted)];
-    for row in wrap(&task.title, width.saturating_sub(2)) {
-        lines.push(DetailLine::text(row, styles.bold));
+    let editing = view
+        .editing
+        .as_ref()
+        .filter(|editing| editing.id == task.id)
+        .map(|editing| editing.field);
+    let mut lines = vec![DetailLine::new(vec![
+        (task.id.clone(), styles.muted),
+        (
+            if view.is_busy(&task.id) {
+                "  saving…".to_owned()
+            } else {
+                String::new()
+            },
+            styles.dim,
+        ),
+    ])];
+    if editing == Some(BoardField::Title) {
+        lines.push(DetailLine::input(Vec::new()));
+    } else {
+        for row in wrap(&task.title, width.saturating_sub(2)) {
+            lines.push(
+                DetailLine::text(row, styles.bold).on_click(BoardTarget::Field(BoardField::Title)),
+            );
+        }
     }
     let mut chips = Vec::new();
     if let Some(kind) = task.task_type.as_deref() {
@@ -1320,42 +1372,61 @@ fn detail_lines(view: &ClientBoardView, width: u16, styles: &Styles) -> Vec<Deta
         lines.push(DetailLine::new(chips));
     }
     lines.push(DetailLine::blank());
-    let field = |label: &str, value: String, style: Style| {
+    let label = |label: &str| (format!("{label:<10}"), styles.muted);
+    let field = |name: &str, value: String, style: Style, target: BoardTarget| {
         DetailLine::new(vec![
-            (format!("{label:<10}"), styles.muted),
-            (format!(" {value} "), styles.chip(style)),
+            label(name),
+            (format!(" {value} ▾ "), styles.chip(style)),
         ])
+        .on_click(target)
     };
     lines.push(field(
         "Status",
         task.status.clone(),
         styles.status(&task.status),
+        BoardTarget::CycleStatus,
     ));
-    lines.push(match task.assignees.first() {
-        Some(agent) => field(
-            "Assignee",
-            format!(
-                "● {}",
-                task.assignees
-                    .iter()
-                    .map(|a| agent_name(a))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+    lines.push(if editing == Some(BoardField::Assignee) {
+        DetailLine::input(vec![label("Assignee"), (" ".to_owned(), styles.base)])
+    } else {
+        match task.assignees.first() {
+            Some(agent) => field(
+                "Assignee",
+                format!(
+                    "● {}",
+                    task.assignees
+                        .iter()
+                        .map(|a| agent_name(a))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                styles.agent(agent),
+                BoardTarget::Field(BoardField::Assignee),
             ),
-            styles.agent(agent),
-        ),
-        None => field("Assignee", "○ Unassigned".into(), styles.muted),
+            None => field(
+                "Assignee",
+                "○ Unassigned".into(),
+                styles.muted,
+                BoardTarget::Field(BoardField::Assignee),
+            ),
+        }
     });
     lines.push(field(
         "Priority",
         task.priority.clone().unwrap_or_else(|| "none".into()),
         styles.priority(task.priority.as_deref()),
+        BoardTarget::CyclePriority,
     ));
-    lines.push(field(
-        "Type",
-        task.task_type.clone().unwrap_or_else(|| "none".into()),
-        styles.muted,
-    ));
+    lines.push(if editing == Some(BoardField::Type) {
+        DetailLine::input(vec![label("Type"), (" ".to_owned(), styles.base)])
+    } else {
+        field(
+            "Type",
+            task.task_type.clone().unwrap_or_else(|| "none".into()),
+            styles.muted,
+            BoardTarget::Field(BoardField::Type),
+        )
+    });
     lines.push(DetailLine::blank());
     lines.push(DetailLine::text(
         "─".repeat(usize::from(width)),
@@ -1366,17 +1437,25 @@ fn detail_lines(view: &ClientBoardView, width: u16, styles: &Styles) -> Vec<Deta
         return lines;
     };
     lines.push(DetailLine::text("Description", styles.bold));
-    match detail
-        .description
-        .as_deref()
-        .filter(|text| !text.trim().is_empty())
-    {
-        Some(text) => lines.extend(
-            wrap(text, width)
-                .into_iter()
-                .map(|row| DetailLine::text(row, styles.muted)),
-        ),
-        None => lines.push(DetailLine::text("No description", styles.dim)),
+    let edit_description = BoardTarget::Field(BoardField::Description);
+    if editing == Some(BoardField::Description) {
+        lines.push(DetailLine::input(Vec::new()));
+    } else {
+        match detail
+            .description
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+        {
+            Some(text) => {
+                lines.extend(wrap(text, width).into_iter().map(|row| {
+                    DetailLine::text(row, styles.muted).on_click(edit_description.clone())
+                }))
+            }
+            None => lines.push(
+                DetailLine::text("No description · click to add", styles.dim)
+                    .on_click(edit_description),
+            ),
+        }
     }
     lines.push(DetailLine::blank());
     let criteria = &detail.acceptance_criteria;
@@ -1406,10 +1485,10 @@ fn detail_lines(view: &ClientBoardView, width: u16, styles: &Styles) -> Vec<Deta
             .enumerate()
         {
             let prefix = if index == 0 { mark } else { "    " };
-            lines.push(DetailLine::new(vec![
-                (prefix.to_owned(), mark_style),
-                (row, text_style),
-            ]));
+            lines.push(
+                DetailLine::new(vec![(prefix.to_owned(), mark_style), (row, text_style)])
+                    .on_click(BoardTarget::ToggleAc(item.index)),
+            );
         }
     }
     lines.push(DetailLine::blank());
@@ -1458,6 +1537,15 @@ fn detail_lines(view: &ClientBoardView, width: u16, styles: &Styles) -> Vec<Deta
             lines.push(DetailLine::text(format!("  {row}"), styles.muted));
         }
     }
+    lines.push(if editing == Some(BoardField::Comment) {
+        DetailLine::input(vec![("› ".to_owned(), styles.accent)])
+    } else {
+        DetailLine::text(
+            format!("{:<1$}", "› Add a comment…", usize::from(width)),
+            styles.button.fg(styles.palette.overlay0),
+        )
+        .on_click(BoardTarget::Field(BoardField::Comment))
+    });
     lines
 }
 
@@ -1467,10 +1555,9 @@ fn render_details(
     view: &ClientBoardView,
     styles: &Styles,
     hits: &mut BoardViewHits,
-) {
-    let Some(text) = geometry.details_text() else {
-        return;
-    };
+) -> Option<crate::protocol::CursorState> {
+    let text = geometry.details_text()?;
+    let mut cursor = None;
     let frame = geometry.docked.or(geometry.popup).unwrap_or(text);
     if let Some(dock) = geometry.docked {
         for y in dock.y..dock.bottom() {
@@ -1538,6 +1625,15 @@ fn render_details(
             };
             x = put_segment(buffer, x, y, text.right(), span, style);
         }
+        if let (true, Some(editing)) = (line.input, view.editing.as_ref()) {
+            let field = Rect::new(x, y, text.right().saturating_sub(x), 1);
+            cursor = super::text_editor::render(
+                buffer,
+                field,
+                &editing.text,
+                styles.button.fg(styles.palette.text),
+            );
+        }
         if let Some(target) = &line.target {
             hits.targets
                 .push((Rect::new(text.x, y, text.width, 1), target.clone()));
@@ -1565,4 +1661,5 @@ fn render_details(
             styles.dim,
         );
     }
+    cursor
 }
