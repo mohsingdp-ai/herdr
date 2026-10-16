@@ -3,7 +3,7 @@
 //! methods; this module only keeps what is on screen and asks for what the
 //! screen needs next. Nothing here runs while no Board is open.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crossterm::event::KeyEventKind;
@@ -51,8 +51,39 @@ pub(super) enum BoardFilter {
 #[derive(Debug)]
 pub(super) enum BoardRequest {
     List,
-    Get { id: String },
+    Get {
+        id: String,
+    },
     Init,
+    /// A drag already shows the task in its new column; failing puts it back in `from`.
+    Move {
+        id: String,
+        from: String,
+    },
+    /// The draft's title comes back to the input if the server refuses it.
+    Create {
+        status: String,
+        title: String,
+    },
+}
+
+/// A card or row held by the mouse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct BoardDrag {
+    pub(super) id: String,
+    pub(super) start: (u16, u16),
+    pub(super) at: (u16, u16),
+    /// Moved since the press: a release drops instead of clicking.
+    pub(super) active: bool,
+    /// The status under the pointer.
+    pub(super) over: Option<String>,
+}
+
+/// A new task being named, in the column or group it will start in.
+#[derive(Debug)]
+pub(super) struct BoardDraft {
+    pub(super) status: String,
+    pub(super) title: TextEditor,
 }
 
 #[derive(Debug)]
@@ -89,6 +120,14 @@ pub(super) struct ClientBoardView {
     pub(super) reveal_selection: bool,
     pub(super) init_busy: bool,
     pub(super) message: Option<String>,
+    /// Cards scrolled past at the top of each kanban column.
+    pub(super) column_scroll: HashMap<String, usize>,
+    pub(super) drag: Option<BoardDrag>,
+    /// Moves on their way to the server, by task: shown already, kept over older lists.
+    pub(super) pending_moves: HashMap<String, String>,
+    pub(super) draft: Option<BoardDraft>,
+    /// The list should be read again.
+    list_stale: bool,
     list_in_flight: bool,
     get_in_flight: Option<String>,
 }
@@ -102,6 +141,8 @@ pub(super) enum BoardRow<'a> {
         folded: bool,
     },
     Task(&'a TaskSummary),
+    /// The new task being named in this group.
+    Draft,
     /// A group with no tasks.
     Empty,
     /// Space between groups.
@@ -136,6 +177,11 @@ impl ClientBoardView {
             reveal_selection: false,
             init_busy: false,
             message: None,
+            column_scroll: HashMap::new(),
+            drag: None,
+            pending_moves: HashMap::new(),
+            draft: None,
+            list_stale: true,
             list_in_flight: false,
             get_in_flight: None,
         }
@@ -289,7 +335,13 @@ impl ClientBoardView {
             if folded {
                 continue;
             }
-            if tasks.is_empty() {
+            let drafting = self
+                .draft
+                .as_ref()
+                .is_some_and(|draft| draft.status == status);
+            if drafting {
+                rows.push(BoardRow::Draft);
+            } else if tasks.is_empty() {
                 rows.push(BoardRow::Empty);
             }
             rows.extend(tasks.into_iter().map(BoardRow::Task));
@@ -306,6 +358,33 @@ impl ClientBoardView {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Takes in a task the server just saved: its card, and its details when shown.
+    fn apply_saved(&mut self, task: TaskDetail) {
+        if let Some(board) = self.board.as_mut() {
+            match board
+                .tasks
+                .iter_mut()
+                .find(|other| other.id == task.summary.id)
+            {
+                Some(summary) => *summary = task.summary.clone(),
+                None => board.tasks.push(task.summary.clone()),
+            }
+        }
+        self.detail = Some(task);
+    }
+
+    /// Puts a refused move back and says why.
+    fn undo_move(&mut self, id: &str, from: &str, reason: String) {
+        if let Some(task) = self
+            .board
+            .as_mut()
+            .and_then(|board| board.tasks.iter_mut().find(|task| task.id == id))
+        {
+            from.clone_into(&mut task.status);
+        }
+        self.message = Some(format!("{id} was not moved: {reason}"));
     }
 
     /// The details on screen: the selected task's, once loaded.
@@ -462,7 +541,8 @@ impl ClientShellState {
         let generation = view.generation;
         let workspace_id = Some(view.workspace_id.clone());
         let mut requests = Vec::new();
-        if !view.list_in_flight {
+        if view.list_stale && !view.list_in_flight {
+            view.list_stale = false;
             view.list_in_flight = true;
             requests.push((
                 Method::TaskList(crate::api::schema::TaskTarget {
@@ -503,7 +583,8 @@ impl ClientShellState {
         }
     }
 
-    /// Returns false (and marks the Board unsupported) when the server cannot take it.
+    /// Returns false (and marks the Board unsupported) when the server cannot
+    /// take it; what the request already showed is put back.
     fn send_board_request(
         &mut self,
         method: Method,
@@ -512,6 +593,18 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) -> bool {
         let supported = self.supports_endpoint_method(&method);
+        let rereads_list = matches!(request, BoardRequest::List);
+        let undo = match &request {
+            BoardRequest::Move { id, from } => Some((id.clone(), from.clone())),
+            _ => None,
+        };
+        let draft = match &request {
+            BoardRequest::Create { status, title } => Some(BoardDraft {
+                status: status.clone(),
+                title: TextEditor::from(title.as_str()),
+            }),
+            _ => None,
+        };
         let sent = self.push_endpoint_method_with_kind(
             method,
             PendingEndpointKind::Board {
@@ -524,6 +617,14 @@ impl ClientShellState {
             if let Some(view) = self.board_view.as_mut() {
                 if !supported {
                     view.load = BoardLoad::Unsupported;
+                }
+                view.list_stale |= rereads_list;
+                if let Some((id, from)) = undo {
+                    view.pending_moves.remove(&id);
+                    view.undo_move(&id, &from, "the server is not reachable".to_owned());
+                }
+                if draft.is_some() {
+                    view.draft = draft;
                 }
                 view.list_in_flight = false;
                 view.get_in_flight = None;
@@ -540,6 +641,7 @@ impl ClientShellState {
                 view.load = BoardLoad::Loading;
             }
             // An answer that never came must not block reading again.
+            view.list_stale = true;
             view.list_in_flight = false;
             view.get_in_flight = None;
             outcome.repaint = true;
@@ -636,6 +738,19 @@ impl ClientShellState {
             return;
         };
         let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
+        if let Some(draft) = view.draft.as_mut() {
+            match code {
+                KeyCode::Esc => view.draft = None,
+                KeyCode::Enter => self.commit_board_draft(outcome),
+                _ => {
+                    if draft.title.handle_key(key).is_none() {
+                        return;
+                    }
+                }
+            }
+            outcome.repaint = true;
+            return;
+        }
         if view.search_focused {
             match code {
                 KeyCode::Esc => {
@@ -697,11 +812,18 @@ impl ClientShellState {
         }
     }
 
-    /// Pasted text goes to the search field when it is focused.
+    /// Pasted text goes to the new task's title or the search field.
     pub(super) fn insert_board_view_text(&mut self, text: &str) -> bool {
-        let Some(view) = self.board_view.as_mut().filter(|view| view.search_focused) else {
+        let Some(view) = self.board_view.as_mut() else {
             return false;
         };
+        if let Some(draft) = view.draft.as_mut() {
+            // A title is one line.
+            return draft.title.insert(&text.replace(['\r', '\n'], " "));
+        }
+        if !view.search_focused {
+            return false;
+        }
         view.list_scroll = 0;
         view.search.insert(text)
     }
@@ -709,7 +831,89 @@ impl ClientShellState {
     pub(super) fn board_view_text_field_focused(&self) -> bool {
         self.board_view
             .as_ref()
-            .is_some_and(|view| view.search_focused)
+            .is_some_and(|view| view.search_focused || view.draft.is_some())
+    }
+
+    /// Starts naming a new task in `status`.
+    pub(super) fn start_board_draft(&mut self, status: String, outcome: &mut ClientShellInput) {
+        let Some(view) = self.board_view.as_mut() else {
+            return;
+        };
+        view.search_focused = false;
+        view.collapsed.remove(&status);
+        view.column_scroll.remove(&status);
+        view.draft = Some(BoardDraft {
+            status,
+            title: TextEditor::default(),
+        });
+        view.reveal_selection = true;
+        outcome.repaint = true;
+    }
+
+    /// Creates the drafted task; an empty title just drops the draft.
+    fn commit_board_draft(&mut self, outcome: &mut ClientShellInput) {
+        let Some(view) = self.board_view.as_mut() else {
+            return;
+        };
+        let Some(draft) = view.draft.take() else {
+            return;
+        };
+        outcome.repaint = true;
+        let title = draft.title.as_str().trim().to_owned();
+        if title.is_empty() {
+            return;
+        }
+        view.message = None;
+        let generation = view.generation;
+        let method = Method::TaskCreate(crate::api::schema::TaskCreateParams {
+            workspace_id: Some(view.workspace_id.clone()),
+            title: title.clone(),
+            status: Some(draft.status.clone()),
+            ..crate::api::schema::TaskCreateParams::default()
+        });
+        let request = BoardRequest::Create {
+            status: draft.status,
+            title,
+        };
+        self.send_board_request(method, generation, request, outcome);
+    }
+
+    /// Shows `id` in `to` at once and saves it; a refusal puts it back.
+    pub(super) fn move_board_task(&mut self, id: &str, to: &str, outcome: &mut ClientShellInput) {
+        let Some(view) = self.board_view.as_mut() else {
+            return;
+        };
+        if view.pending_moves.contains_key(id) {
+            return;
+        }
+        let Some(task) = view
+            .board
+            .as_mut()
+            .and_then(|board| board.tasks.iter_mut().find(|task| task.id == id))
+        else {
+            return;
+        };
+        if task.status == to {
+            return;
+        }
+        let from = std::mem::replace(&mut task.status, to.to_owned());
+        let fingerprint = task.fingerprint.clone();
+        view.pending_moves.insert(id.to_owned(), to.to_owned());
+        view.message = None;
+        outcome.repaint = true;
+        let generation = view.generation;
+        let method = Method::TaskUpdate(crate::api::schema::TaskUpdateParams {
+            workspace_id: Some(view.workspace_id.clone()),
+            id: id.to_owned(),
+            fingerprint: Some(fingerprint),
+            status: Some(to.to_owned()),
+            ..crate::api::schema::TaskUpdateParams::default()
+        });
+        let request = BoardRequest::Move {
+            id: id.to_owned(),
+            from,
+        };
+        self.send_board_request(method, generation, request, outcome);
     }
 
     /// Mouse events over the Board. Returns false for events elsewhere (the
@@ -734,6 +938,15 @@ impl ClientShellState {
             outcome.repaint = true;
             return false;
         }
+        if self
+            .board_view
+            .as_ref()
+            .is_some_and(|view| view.drag.is_some())
+        {
+            // A held card follows the pointer anywhere until it is let go.
+            self.route_board_drag(mouse, outcome);
+            return true;
+        }
         let hits = &self.hits.board_view;
         if !super::contains(hits.area, point)
             || super::contains(self.hits.notification_toast, point)
@@ -748,9 +961,18 @@ impl ClientShellState {
                     3
                 };
                 let (list, details) = (hits.list, hits.details);
+                let column = hits
+                    .columns
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, status)| status.clone());
                 if let Some(view) = self.board_view.as_mut() {
                     if super::contains(details, point) {
                         view.details_scroll = view.details_scroll.saturating_add_signed(delta);
+                    } else if let Some(status) = column {
+                        let scroll = view.column_scroll.entry(status).or_default();
+                        // Cards are tall; one per notch.
+                        *scroll = scroll.saturating_add_signed(delta.signum());
                     } else if super::contains(list, point) {
                         view.list_scroll = view.list_scroll.saturating_add_signed(delta);
                     }
@@ -770,7 +992,26 @@ impl ClientShellState {
                         outcome.repaint = true;
                     }
                 }
-                if let Some(target) = target {
+                if self
+                    .board_view
+                    .as_ref()
+                    .is_some_and(|view| view.draft.is_some())
+                    && !matches!(target, Some(BoardTarget::Draft))
+                {
+                    // Clicking away keeps a typed title as a new task.
+                    self.commit_board_draft(outcome);
+                }
+                if let Some(BoardTarget::Card(id)) = target {
+                    if let Some(view) = self.board_view.as_mut() {
+                        view.drag = Some(BoardDrag {
+                            id,
+                            start: point,
+                            at: point,
+                            active: false,
+                            over: None,
+                        });
+                    }
+                } else if let Some(target) = target {
                     self.activate_board_target(target, outcome);
                 }
             }
@@ -785,8 +1026,9 @@ impl ClientShellState {
             BoardTarget::Init => self.init_board(outcome),
             BoardTarget::Retry => self.refresh_board_view(outcome),
             BoardTarget::Mode(mode) => self.set_board_mode(mode, outcome),
-            BoardTarget::Task(id) => self.select_board_task(id, outcome),
-            BoardTarget::Nothing => {}
+            BoardTarget::Task(id) | BoardTarget::Card(id) => self.select_board_task(id, outcome),
+            BoardTarget::NewTask(status) => self.start_board_draft(status, outcome),
+            BoardTarget::Nothing | BoardTarget::Draft => {}
             target => {
                 let Some(view) = self.board_view.as_mut() else {
                     return;
@@ -825,6 +1067,54 @@ impl ClientShellState {
         }
     }
 
+    /// Moves and releases while a card is held.
+    fn route_board_drag(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let point = (mouse.column, mouse.row);
+        let over = self
+            .hits
+            .board_view
+            .drop_zones
+            .iter()
+            .rev()
+            .find(|(rect, _)| super::contains(*rect, point))
+            .map(|(_, status)| status.clone());
+        let Some(view) = self.board_view.as_mut() else {
+            return;
+        };
+        match mouse.kind {
+            MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Moved => {
+                if let Some(drag) = view.drag.as_mut() {
+                    drag.active |= point != drag.start;
+                    drag.at = point;
+                    drag.over = over;
+                    outcome.repaint |= drag.active;
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let Some(drag) = view.drag.take() else {
+                    return;
+                };
+                outcome.repaint = true;
+                if !drag.active {
+                    self.select_board_task(drag.id, outcome);
+                } else if let Some(to) = over {
+                    self.move_board_task(&drag.id, &to, outcome);
+                }
+            }
+            // Any other button or a second press drops the hold.
+            MouseEventKind::Down(_) => {
+                view.drag = None;
+                outcome.repaint = true;
+            }
+            _ => {}
+        }
+    }
+
     /// A `task.*` answer. Returns whether to repaint and any follow-up requests.
     pub(super) fn handle_board_view_result(
         &mut self,
@@ -858,6 +1148,13 @@ impl ClientShellState {
                             view.mode_root = Some(board.root.clone());
                         }
                         view.status_filter = view.status_filter.min(board.statuses.len());
+                        let mut board = board;
+                        // A move still on its way is not in this list yet.
+                        for task in &mut board.tasks {
+                            if let Some(to) = view.pending_moves.get(&task.id) {
+                                task.status.clone_from(to);
+                            }
+                        }
                         if view
                             .selected
                             .as_ref()
@@ -893,6 +1190,42 @@ impl ClientShellState {
                     Err(error) => view.message = Some(error.message),
                 }
             }
+            BoardRequest::Move { id, from } => {
+                view.pending_moves.remove(&id);
+                match result {
+                    Ok(ResponseResult::TaskDetail { task }) => view.apply_saved(task),
+                    Ok(_) => view.undo_move(&id, &from, "unexpected answer from the server".into()),
+                    Err(error) => {
+                        let conflict = error.code.as_deref() == Some("task_conflict");
+                        let reason = if conflict {
+                            "it changed since the Board loaded it · reloaded".to_owned()
+                        } else {
+                            error.message
+                        };
+                        view.undo_move(&id, &from, reason);
+                        view.list_stale |= conflict;
+                    }
+                }
+            }
+            BoardRequest::Create { status, title } => match result {
+                Ok(ResponseResult::TaskDetail { task }) => {
+                    let id = task.summary.id.clone();
+                    view.apply_saved(task);
+                    view.selected = Some(id);
+                    view.details_open = true;
+                    view.details_scroll = 0;
+                    view.reveal_selection = true;
+                }
+                Ok(_) => view.message = Some("unexpected answer from the server".into()),
+                Err(error) => {
+                    // The title comes back so nothing typed is lost.
+                    view.draft = Some(BoardDraft {
+                        status,
+                        title: TextEditor::from(title.as_str()),
+                    });
+                    view.message = Some(format!("the task was not created: {}", error.message));
+                }
+            },
         }
         let mut outcome = ClientShellInput::default();
         // Details wanted while the list was on its way.
@@ -911,7 +1244,14 @@ pub(super) enum BoardTarget {
     Filter(BoardFilter),
     Sort(BoardSortKey),
     Group(String),
+    /// A link to a task: a click opens it.
     Task(String),
+    /// A card or list row: a click opens it, a drag moves it.
+    Card(String),
+    /// A column's or group's `+`.
+    NewTask(String),
+    /// The new task's title field.
+    Draft,
     CloseDetails,
     /// Takes a click so nothing under it does.
     Nothing,
@@ -923,6 +1263,10 @@ pub(super) struct BoardViewHits {
     pub(super) list: Rect,
     pub(super) details: Rect,
     pub(super) targets: Vec<(Rect, BoardTarget)>,
+    /// Where a held card lands, by status.
+    pub(super) drop_zones: Vec<(Rect, String)>,
+    /// Kanban columns, for scrolling each on its own.
+    pub(super) columns: Vec<(Rect, String)>,
 }
 
 #[cfg(test)]
@@ -964,6 +1308,7 @@ mod tests {
             .map(|row| match row {
                 BoardRow::Group { status, count, .. } => format!("[{status} {count}]"),
                 BoardRow::Task(task) => task.id.clone(),
+                BoardRow::Draft => "draft".into(),
                 BoardRow::Empty => "empty".into(),
                 BoardRow::Gap => "-".into(),
             })

@@ -113,9 +113,14 @@ impl ClientBoardView {
         }
         let reveal = std::mem::take(&mut self.reveal_selection);
         let rows = self.list_rows();
-        let selected = rows.iter().position(
-            |row| matches!(row, BoardRow::Task(task) if Some(&task.id) == self.selected.as_ref()),
-        );
+        // The new task's field when one is open, else the selected row.
+        let selected = rows.iter().position(|row| match row {
+            BoardRow::Draft => true,
+            BoardRow::Task(task) => {
+                self.draft.is_none() && Some(&task.id) == self.selected.as_ref()
+            }
+            _ => false,
+        });
         let row_count = rows.len();
         let viewport = usize::from(list_viewport(&geometry));
         if let Some(index) = selected.filter(|_| reveal && viewport > 0) {
@@ -126,6 +131,22 @@ impl ClientBoardView {
             }
         }
         self.list_scroll = self.list_scroll.min(row_count.saturating_sub(viewport));
+        let statuses: Vec<String> = self
+            .shown_statuses()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        for status in statuses {
+            let drafting = self
+                .draft
+                .as_ref()
+                .is_some_and(|draft| draft.status == status);
+            let capacity = column_capacity(geometry.body.height, drafting);
+            let cards = self.column(&status).len();
+            if let Some(scroll) = self.column_scroll.get_mut(&status) {
+                *scroll = (*scroll).min(cards.saturating_sub(capacity));
+            }
+        }
         if let Some(text) = geometry.details_text() {
             let lines = detail_lines(self, text.width, &Styles::new(palette)).len();
             self.details_scroll = self
@@ -290,17 +311,13 @@ pub(super) fn render_board_view(
         BoardLoad::Ready => {
             frame.cursor = render_toolbar(buffer, &geometry, view, &styles, &mut frame.hits);
             frame.hits.list = geometry.body;
-            match view.mode {
+            let draft_cursor = match view.mode {
                 BoardMode::List => render_list(buffer, &geometry, view, &styles, &mut frame.hits),
-                BoardMode::Kanban => put_text(
-                    buffer,
-                    geometry.body.x + 1,
-                    geometry.body.y,
-                    geometry.body.width.saturating_sub(1),
-                    "the kanban view is on its way · switch to List for now",
-                    styles.dim,
-                ),
-            }
+                BoardMode::Kanban => {
+                    render_kanban(buffer, &geometry, view, &styles, &mut frame.hits)
+                }
+            };
+            frame.cursor = frame.cursor.or(draft_cursor);
         }
         BoardLoad::Loading => put_text(
             buffer,
@@ -357,8 +374,303 @@ pub(super) fn render_board_view(
     render_hint(buffer, &geometry, view, &styles);
     if view.load == BoardLoad::Ready {
         render_details(buffer, &geometry, view, &styles, &mut frame.hits);
+        render_held_card(buffer, area, view, &styles);
     }
     frame
+}
+
+/// The card under the pointer while it is dragged.
+fn render_held_card(buffer: &mut Buffer, area: Rect, view: &ClientBoardView, styles: &Styles) {
+    let Some(drag) = view.drag.as_ref().filter(|drag| drag.active) else {
+        return;
+    };
+    let Some(task) = view.task(&drag.id) else {
+        return;
+    };
+    let (x, y) = (drag.at.0.saturating_add(1), drag.at.1);
+    if !super::contains(area, (x, y)) {
+        return;
+    }
+    let label = format!(" {} {} ", task.id, fit(&task.title, 26));
+    put_text(
+        buffer,
+        x,
+        y,
+        area.right().saturating_sub(x),
+        &label,
+        styles.primary,
+    );
+}
+
+/// The status a held card is over, when it would move there.
+fn drop_target(view: &ClientBoardView) -> Option<&str> {
+    let drag = view.drag.as_ref().filter(|drag| drag.active)?;
+    let over = drag.over.as_deref()?;
+    (view.task(&drag.id).map(|task| task.status.as_str()) != Some(over)).then_some(over)
+}
+
+fn held(view: &ClientBoardView, id: &str) -> bool {
+    view.drag
+        .as_ref()
+        .is_some_and(|drag| drag.active && drag.id == id)
+}
+
+/// Rows a kanban card takes, borders included.
+const CARD_HEIGHT: u16 = 7;
+/// Rows the new task's field takes at the top of its column.
+const DRAFT_HEIGHT: u16 = 3;
+
+/// Cards that fit in a column of `height` rows, borders included.
+pub(super) fn column_capacity(height: u16, drafting: bool) -> usize {
+    let inner = height
+        .saturating_sub(2)
+        .saturating_sub(if drafting { DRAFT_HEIGHT } else { 0 });
+    usize::from(inner / CARD_HEIGHT)
+}
+
+fn render_kanban(
+    buffer: &mut Buffer,
+    geometry: &BoardGeometry,
+    view: &ClientBoardView,
+    styles: &Styles,
+    hits: &mut BoardViewHits,
+) -> Option<crate::protocol::CursorState> {
+    let area = geometry.body;
+    let statuses = view.shown_statuses();
+    let count = statuses.len().max(1) as u16;
+    let width = area.width.saturating_sub(count - 1) / count;
+    let target = drop_target(view);
+    let mut cursor = None;
+    for (index, status) in statuses.iter().enumerate() {
+        let x = area.x + index as u16 * (width + 1);
+        // The last column takes what rounding left over.
+        let column_width = if index + 1 == statuses.len() {
+            area.right().saturating_sub(x)
+        } else {
+            width
+        };
+        let rect = Rect::new(x, area.y, column_width, area.height);
+        if rect.width < 8 || rect.height < 4 {
+            continue;
+        }
+        let tasks = view.column(status);
+        let over = target == Some(*status);
+        draw_box(buffer, rect, if over { styles.accent } else { styles.rule });
+        let x = put_segment(
+            buffer,
+            rect.x + 2,
+            rect.y,
+            rect.right().saturating_sub(6),
+            &format!(" {status} "),
+            styles.status(status).add_modifier(Modifier::BOLD),
+        );
+        put_segment(
+            buffer,
+            x,
+            rect.y,
+            rect.right().saturating_sub(6),
+            &format!(" {} ", tasks.len()),
+            styles.button,
+        );
+        let plus = Rect::new(rect.right().saturating_sub(5), rect.y, 3, 1);
+        put_text(buffer, plus.x, plus.y, 3, " + ", styles.muted);
+        hits.targets
+            .push((plus, BoardTarget::NewTask((*status).to_owned())));
+        hits.drop_zones.push((rect, (*status).to_owned()));
+        hits.columns.push((rect, (*status).to_owned()));
+
+        let inner = Rect::new(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+        let mut y = inner.y;
+        let drafting = view.draft.as_ref().filter(|draft| draft.status == *status);
+        if let Some(draft) = drafting {
+            let field = Rect::new(inner.x, y, inner.width, DRAFT_HEIGHT);
+            draw_box(buffer, field, styles.accent);
+            let text = Rect::new(field.x + 2, y + 1, field.width.saturating_sub(4), 1);
+            cursor = super::text_editor::render(buffer, text, &draft.title, styles.base);
+            if draft.title.is_empty() {
+                put_text(
+                    buffer,
+                    text.x + 1,
+                    text.y,
+                    text.width.saturating_sub(1),
+                    "title · enter to add",
+                    styles.dim,
+                );
+            }
+            hits.targets.push((field, BoardTarget::Draft));
+            y += DRAFT_HEIGHT;
+        }
+        let capacity = column_capacity(rect.height, drafting.is_some());
+        let scroll = view
+            .column_scroll
+            .get(*status)
+            .copied()
+            .unwrap_or(0)
+            .min(tasks.len().saturating_sub(capacity));
+        for task in tasks.iter().skip(scroll).take(capacity) {
+            render_card(
+                buffer,
+                Rect::new(inner.x, y, inner.width, CARD_HEIGHT),
+                task,
+                view,
+                styles,
+                hits,
+            );
+            y += CARD_HEIGHT;
+        }
+        if tasks.is_empty() && drafting.is_none() {
+            let text = if over { "drop here" } else { "No tasks" };
+            put_text(
+                buffer,
+                inner.x + 1,
+                inner.y + 1,
+                inner.width.saturating_sub(1),
+                text,
+                styles.dim,
+            );
+        }
+        let below = tasks.len().saturating_sub(scroll + capacity);
+        if below > 0 {
+            let text = format!(" ↓ {below} more ");
+            put_text(
+                buffer,
+                rect.x + 2,
+                rect.bottom() - 1,
+                display_width(&text),
+                &text,
+                styles.muted,
+            );
+        }
+        if scroll > 0 {
+            let text = format!(" ↑ {scroll} ");
+            let width = display_width(&text);
+            put_text(
+                buffer,
+                rect.right().saturating_sub(width + 2),
+                rect.bottom() - 1,
+                width,
+                &text,
+                styles.muted,
+            );
+        }
+    }
+    cursor
+}
+
+fn render_card(
+    buffer: &mut Buffer,
+    rect: Rect,
+    task: &TaskSummary,
+    view: &ClientBoardView,
+    styles: &Styles,
+    hits: &mut BoardViewHits,
+) {
+    let selected = view.selected.as_ref() == Some(&task.id) && view.details_open;
+    let lifted = held(view, &task.id);
+    let border = if selected {
+        styles.accent
+    } else if lifted {
+        styles.dim
+    } else {
+        styles.rule
+    };
+    draw_box(buffer, rect, border);
+    let inner = Rect::new(
+        rect.x + 2,
+        rect.y + 1,
+        rect.width.saturating_sub(4),
+        rect.height - 2,
+    );
+    put_text(
+        buffer,
+        inner.x,
+        inner.y,
+        inner.width,
+        &task.id,
+        styles.muted,
+    );
+    // The longest note that fits beside the ID.
+    let room = inner.width.saturating_sub(display_width(&task.id) + 1);
+    let notes: Vec<String> = if view.pending_moves.contains_key(&task.id) {
+        vec!["saving…".to_owned(), "↻".to_owned()]
+    } else if task.acceptance_criteria_total > 0 {
+        vec![format!(
+            "✓{}/{}",
+            task.acceptance_criteria_checked, task.acceptance_criteria_total
+        )]
+    } else {
+        Vec::new()
+    };
+    if let Some(note) = notes.iter().find(|note| display_width(note) <= room) {
+        let width = display_width(note);
+        put_text(
+            buffer,
+            inner.right() - width,
+            inner.y,
+            width,
+            note,
+            styles.dim,
+        );
+    }
+    let title_style = if lifted { styles.dim } else { styles.base };
+    let mut rows = wrap(&task.title, inner.width);
+    if rows.len() > 2 {
+        let rest = rows[1..].join(" ");
+        rows.truncate(1);
+        rows.push(fit(&rest, inner.width).into_owned());
+    }
+    for (index, row) in rows.iter().enumerate() {
+        put_text(
+            buffer,
+            inner.x,
+            inner.y + 1 + index as u16,
+            inner.width,
+            row,
+            title_style,
+        );
+    }
+    // Chips that would be cut off are left out instead.
+    let mut x = inner.x;
+    let mut chips: Vec<(String, Style)> = Vec::new();
+    if let Some(kind) = task.task_type.as_deref() {
+        chips.push((format!(" {kind} "), styles.button));
+    }
+    for label in &task.labels {
+        chips.push((format!(" {label} "), styles.chip(styles.agent(label))));
+    }
+    if let Some(priority) = task.priority.as_deref() {
+        chips.push((
+            format!(" {priority} "),
+            styles.chip(styles.priority(Some(priority))),
+        ));
+    }
+    for (chip, style) in chips {
+        let width = display_width(&chip);
+        if x + width > inner.right() {
+            break;
+        }
+        put_text(buffer, x, inner.y + 3, width, &chip, style);
+        x += width + 1;
+    }
+    let (mark, name, style) = match task.assignees.first() {
+        Some(agent) => ("●", agent_name(agent), styles.agent(agent)),
+        None => ("○", "Unassigned".to_owned(), styles.dim),
+    };
+    put_text(buffer, inner.x, inner.y + 4, 1, mark, style);
+    put_text(
+        buffer,
+        inner.x + 2,
+        inner.y + 4,
+        inner.width.saturating_sub(2),
+        &fit(&name, inner.width.saturating_sub(2)),
+        if task.assignees.is_empty() {
+            styles.dim
+        } else {
+            styles.base
+        },
+    );
+    hits.targets
+        .push((rect, BoardTarget::Card(task.id.clone())));
 }
 
 fn render_header(
@@ -560,7 +872,7 @@ fn render_list(
     view: &ClientBoardView,
     styles: &Styles,
     hits: &mut BoardViewHits,
-) {
+) -> Option<crate::protocol::CursorState> {
     let area = geometry.body;
     let columns = ListColumns::new(area);
     let mut heads = vec![
@@ -605,6 +917,18 @@ fn render_list(
             styles.dim,
         );
     }
+    let target = drop_target(view);
+    let mut cursor = None;
+    // Each group's rows on screen, where a held row can land.
+    let mut zones: Vec<(String, u16, u16)> = Vec::new();
+    let mut group = rows
+        .iter()
+        .take(view.list_scroll)
+        .rev()
+        .find_map(|row| match row {
+            BoardRow::Group { status, .. } => Some((*status).to_owned()),
+            _ => None,
+        });
     for (offset, row) in rows
         .iter()
         .skip(view.list_scroll)
@@ -612,12 +936,25 @@ fn render_list(
         .enumerate()
     {
         let y = top + offset as u16;
+        if let BoardRow::Group { status, .. } = row {
+            group = Some((*status).to_owned());
+        }
+        if let (Some(status), false) = (group.as_ref(), matches!(row, BoardRow::Gap)) {
+            match zones.last_mut() {
+                Some((last, _, end)) if last == status => *end = y,
+                _ => zones.push((status.clone(), y, y)),
+            }
+        }
         match row {
             BoardRow::Group {
                 status,
                 count,
                 folded,
             } => {
+                let plus = Rect::new(area.right().saturating_sub(3), y, 3, 1);
+                put_text(buffer, plus.x, y, 3, " + ", styles.dim);
+                hits.targets
+                    .push((plus, BoardTarget::NewTask((*status).to_owned())));
                 let label = format!("{} {status} ", if *folded { "▸" } else { "▾" });
                 let x = put_segment(
                     buffer,
@@ -634,18 +971,61 @@ fn render_list(
                 ));
             }
             BoardRow::Empty => {
-                put_text(buffer, area.x + 2, y, area.width, "No tasks", styles.dim);
+                let over = group
+                    .as_deref()
+                    .is_some_and(|status| target == Some(status));
+                let text = if over { "drop here" } else { "No tasks" };
+                put_text(buffer, area.x + 2, y, area.width, text, styles.dim);
+            }
+            BoardRow::Draft => {
+                if let Some(draft) = view.draft.as_ref() {
+                    let field = Rect::new(columns.title, y, columns.title_width, 1);
+                    put_text(buffer, columns.id, y, 6, "new", styles.accent);
+                    cursor = super::text_editor::render(
+                        buffer,
+                        field,
+                        &draft.title,
+                        styles.button.fg(styles.palette.text),
+                    );
+                    if draft.title.is_empty() {
+                        put_text(
+                            buffer,
+                            field.x + 1,
+                            y,
+                            field.width.saturating_sub(1),
+                            "title · enter to add · esc to cancel",
+                            styles.button,
+                        );
+                    }
+                    hits.targets
+                        .push((Rect::new(area.x, y, area.width, 1), BoardTarget::Draft));
+                }
             }
             BoardRow::Gap => {}
             BoardRow::Task(task) => {
                 render_list_row(buffer, area, &columns, y, task, view, styles);
                 hits.targets.push((
                     Rect::new(area.x, y, area.width, 1),
-                    BoardTarget::Task(task.id.clone()),
+                    BoardTarget::Card(task.id.clone()),
                 ));
             }
         }
     }
+    for (status, start, end) in zones {
+        let rect = Rect::new(
+            area.x.saturating_sub(1),
+            start,
+            area.width + 1,
+            end - start + 1,
+        );
+        if target == Some(status.as_str()) {
+            for y in start..=end {
+                put_text(buffer, rect.x, y, 1, "▌", styles.accent);
+            }
+        }
+        hits.drop_zones.push((rect, status));
+    }
+    cursor
 }
 
 fn render_list_row(
@@ -697,7 +1077,11 @@ fn render_list_row(
         y,
         columns.title_width,
         &fit(&task.title, columns.title_width.saturating_sub(1)),
-        bg(styles.base),
+        bg(if held(view, &task.id) {
+            styles.dim
+        } else {
+            styles.base
+        }),
     );
     put_text(
         buffer,
