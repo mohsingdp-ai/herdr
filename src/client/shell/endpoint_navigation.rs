@@ -96,6 +96,7 @@ impl ClientShellState {
             return false;
         };
         self.close_git_view(outcome);
+        self.close_board_view(outcome);
         self.focus_or_activate(
             endpoint_id,
             ClientEndpointFocusTarget::Pane(pane_id),

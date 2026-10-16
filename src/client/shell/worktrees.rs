@@ -538,6 +538,7 @@ impl ClientShellState {
                 | PendingEndpointKind::CheckpointList
                 | PendingEndpointKind::CheckpointRestore
                 | PendingEndpointKind::Git { .. }
+                | PendingEndpointKind::Board { .. }
                 | PendingEndpointKind::SelectionCopy
                 | PendingEndpointKind::PaneScroll { .. }
                 | PendingEndpointKind::WordSelection { .. }

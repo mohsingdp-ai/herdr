@@ -187,6 +187,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # last_pane = ""          # optional, unset by default; bind e.g. "prefix+tab" for global back-and-forth
 # toggle_editor = ""      # optional, unset by default; bind e.g. "prefix+o" to flip an agent and its $EDITOR
 # git_view = ""           # optional, unset by default; bind e.g. "prefix+i" to show the space's changes and history
+# board_view = ""         # optional, unset by default; bind e.g. "prefix+b" to show the space's task board
 # split_vertical = "prefix+v"
 # split_horizontal = "prefix+minus"
 # close_pane = "prefix+x"

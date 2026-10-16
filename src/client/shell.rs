@@ -17,6 +17,8 @@ mod endpoint_notices;
 mod endpoint_sidebar;
 mod endpoints;
 pub(super) use endpoints::*;
+mod board_view;
+mod board_view_render;
 mod checkpoint_picker;
 mod git_view;
 mod git_view_render;

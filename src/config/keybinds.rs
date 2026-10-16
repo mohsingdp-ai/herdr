@@ -395,6 +395,7 @@ pub struct Keybinds {
     pub last_pane: ActionKeybinds,
     pub toggle_editor: ActionKeybinds,
     pub git_view: ActionKeybinds,
+    pub board_view: ActionKeybinds,
     pub split_vertical: ActionKeybinds,
     pub split_horizontal: ActionKeybinds,
     pub close_pane: ActionKeybinds,
@@ -580,6 +581,7 @@ impl Config {
             last_pane: empty_action!(),
             toggle_editor: empty_action!(),
             git_view: empty_action!(),
+            board_view: empty_action!(),
             split_vertical: empty_action!(),
             split_horizontal: empty_action!(),
             close_pane: empty_action!(),
@@ -728,6 +730,7 @@ impl Config {
             apply_action!(keybinds.last_pane, last_pane, source);
             apply_action!(keybinds.toggle_editor, toggle_editor, source);
             apply_action!(keybinds.git_view, git_view, source);
+            apply_action!(keybinds.board_view, board_view, source);
             apply_action!(keybinds.cycle_pane_next, cycle_pane_next, source);
             apply_action!(keybinds.cycle_pane_previous, cycle_pane_previous, source);
             apply_action!(keybinds.split_vertical, split_vertical, source);

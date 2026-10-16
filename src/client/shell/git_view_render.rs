@@ -193,7 +193,7 @@ fn commit_body_rows(commit: &GitCommitInfo, width: u16, open: bool, height: u16)
 }
 
 /// Splits text into rows of at most `width` display columns, keeping line breaks.
-fn wrap(text: &str, width: u16) -> Vec<String> {
+pub(super) fn wrap(text: &str, width: u16) -> Vec<String> {
     let width = usize::from(width.max(1));
     let mut rows = Vec::new();
     for line in text.lines() {
@@ -215,7 +215,7 @@ fn wrap(text: &str, width: u16) -> Vec<String> {
 }
 
 /// `text` cut to `width` columns, ending in "…" when it did not fit.
-fn fit(text: &str, width: u16) -> std::borrow::Cow<'_, str> {
+pub(super) fn fit(text: &str, width: u16) -> std::borrow::Cow<'_, str> {
     let width = usize::from(width);
     if UnicodeWidthStr::width(text) <= width {
         return std::borrow::Cow::Borrowed(text);

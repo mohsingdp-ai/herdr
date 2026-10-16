@@ -62,6 +62,7 @@ impl ClientShellState {
             collapsed_groups,
             remote_collapsed_groups,
             space_list: self.space_list,
+            board_kanban_roots: self.board_kanban_roots.iter().cloned().collect(),
         };
         if let Err(error) = preferences::store(path, preferences) {
             self.set_endpoint_error(error);

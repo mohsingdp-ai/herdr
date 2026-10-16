@@ -51,6 +51,10 @@ pub(super) fn global_menu_items(
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::GitView),
     ));
     items.push((
+        "board",
+        ClientGlobalMenuAction::Binding(crate::input::KeybindAction::BoardView),
+    ));
+    items.push((
         "detach",
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
     ));

@@ -254,28 +254,46 @@ pub(in crate::client::shell) fn render_git_tab(
     label: &str,
     hits: &mut ShellHitMap,
 ) {
+    render_stand_in_tab(buffer, area, snapshot, config, label, true, hits);
+}
+
+/// A tab that stands in for the space's panes (the git view, the Board),
+/// drawn after the real tabs and any earlier stand-in, with the new-tab
+/// button moved after it. In front, the real tabs step back. Returns where
+/// it was drawn; nothing when the strip has no room.
+pub(in crate::client::shell) fn render_stand_in_tab(
+    buffer: &mut Buffer,
+    area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    label: &str,
+    in_front: bool,
+    hits: &mut ShellHitMap,
+) -> Rect {
     let palette = &config.palette;
-    for (rect, tab_id) in &hits.tabs {
-        let custom = snapshot
-            .tabs
-            .iter()
-            .any(|tab| &tab.tab_id == tab_id && tab.custom_label);
-        let fg = if custom {
-            palette.overlay1
-        } else {
-            palette.overlay0
-        };
-        buffer.set_style(
-            *rect,
-            Style::default()
-                .fg(fg)
-                .bg(palette.surface0)
-                .remove_modifier(Modifier::BOLD),
-        );
+    if in_front {
+        for (rect, tab_id) in &hits.tabs {
+            let custom = snapshot
+                .tabs
+                .iter()
+                .any(|tab| &tab.tab_id == tab_id && tab.custom_label);
+            let fg = if custom {
+                palette.overlay1
+            } else {
+                palette.overlay0
+            };
+            buffer.set_style(
+                *rect,
+                Style::default()
+                    .fg(fg)
+                    .bg(palette.surface0)
+                    .remove_modifier(Modifier::BOLD),
+            );
+        }
     }
     // An overflowing strip has no room left; the view's own header names it.
     if hits.tab_scroll_right.width > 0 {
-        return;
+        return Rect::default();
     }
     let content = tab_bar_content_area(snapshot, area);
     if hits.new_tab.width > 0 {
@@ -292,24 +310,27 @@ pub(in crate::client::shell) fn render_git_tab(
     let x = hits
         .tabs
         .last()
-        .map_or(content.x, |(rect, _)| rect.right().saturating_add(1));
+        .map(|(rect, _)| *rect)
+        .into_iter()
+        .chain((hits.board_tab.width > 0).then_some(hits.board_tab))
+        .map(|rect| rect.right().saturating_add(1))
+        .max()
+        .unwrap_or(content.x);
     let text = format!("  {label}  ");
     let width = display_width(&text);
     if x.saturating_add(width) > content.right() {
         hits.new_tab = Rect::default();
-        return;
+        return Rect::default();
     }
-    put_text(
-        buffer,
-        x,
-        area.y,
-        width,
-        &text,
+    let style = if in_front {
         Style::default()
             .fg(panel_contrast_fg(palette))
             .bg(palette.accent)
-            .add_modifier(Modifier::BOLD),
-    );
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(palette.overlay0).bg(palette.surface0)
+    };
+    put_text(buffer, x, area.y, width, &text, style);
     if hits.new_tab.width > 0 {
         let new_x = x + width + 1;
         if new_x.saturating_add(NEW_TAB_WIDTH) <= content.right() {
@@ -326,6 +347,7 @@ pub(in crate::client::shell) fn render_git_tab(
             hits.new_tab = Rect::default();
         }
     }
+    Rect::new(x, area.y, width, 1)
 }
 
 fn tab_bar_content_area(snapshot: &ClientShellSnapshot, area: Rect) -> Rect {

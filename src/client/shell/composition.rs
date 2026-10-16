@@ -241,6 +241,29 @@ impl ClientShellState {
                 hovered_space: SidebarHover::space(&self.sidebar_hover),
             },
         );
+        // The Board's tab sits after the real tabs in every space; a click opens it.
+        if layout.tab_bar.height > 0 && self.config.mouse_capture {
+            let label = match self.board_view.as_ref() {
+                Some(view) if view.board.is_some() => format!("▦ board {}", view.open_count()),
+                _ => "▦ board".to_owned(),
+            };
+            self.hits.board_tab = render::render_stand_in_tab(
+                &mut buffer,
+                layout.tab_bar,
+                snapshot,
+                &self.config,
+                &label,
+                self.board_view.is_some(),
+                &mut self.hits,
+            );
+        }
+        let board_space_label = self.board_view.as_ref().map(|view| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == view.workspace_id)
+                .map_or_else(String::new, |workspace| workspace.label.clone())
+        });
         let git_space_label = self.git_view.as_ref().map(|view| {
             snapshot
                 .workspaces
@@ -369,6 +392,7 @@ impl ClientShellState {
             self.hits.new_tab = Rect::default();
             self.hits.tab_scroll_left = Rect::default();
             self.hits.tab_scroll_right = Rect::default();
+            self.hits.board_tab = Rect::default();
         }
         let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
         let mode_bar_cells = mode_bar.map(|bar| {
@@ -392,6 +416,25 @@ impl ClientShellState {
             );
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, rendered.cursor);
             self.hits.git_view = rendered.hits;
+            self.hits.panes.clear();
+            self.hits.pane_splits.clear();
+            occlusion.cover(layout.pane_surface);
+            restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
+        }
+        if let (Some(view), Some(label)) = (self.board_view.as_mut(), board_space_label.as_deref())
+        {
+            // Like the git view, the Board stands in for the space's panes.
+            view.prepare_frame(layout.pane_surface, &self.config.palette);
+            let mut composed = frame.to_ratatui_buffer()?;
+            let rendered = board_view_render::render_board_view(
+                &mut composed,
+                layout.pane_surface,
+                view,
+                label,
+                &self.config.palette,
+            );
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, rendered.cursor);
+            self.hits.board_view = rendered.hits;
             self.hits.panes.clear();
             self.hits.pane_splits.clear();
             occlusion.cover(layout.pane_surface);

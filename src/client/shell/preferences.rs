@@ -31,6 +31,9 @@ pub(super) struct ClientChromePreferences {
     /// Nested sidebar drawn as the compact list instead of the tree.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) space_list: bool,
+    /// Projects (by folder) whose Board shows the kanban view.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) board_kanban_roots: Vec<String>,
 }
 
 pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {

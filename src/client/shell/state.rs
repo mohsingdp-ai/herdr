@@ -111,6 +111,9 @@ pub(super) struct ShellHitMap {
     /// git view on the agent's own folder.
     pub(super) agent_git_buttons: Vec<(Rect, String, String)>,
     pub(super) git_view: super::git_view::GitViewHits,
+    pub(super) board_view: super::board_view::BoardViewHits,
+    /// The Board's stand-in tab in the tab bar.
+    pub(super) board_tab: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,
@@ -699,6 +702,10 @@ pub(super) enum PendingEndpointKind {
         generation: u64,
         request: super::git_view::GitRequest,
     },
+    Board {
+        generation: u64,
+        request: super::board_view::BoardRequest,
+    },
     SelectionCopy,
     PaneScroll {
         pane_id: String,
@@ -970,6 +977,13 @@ pub(crate) struct ClientShellState {
     /// The git view, shown in place of the focused space's panes.
     pub(super) git_view: Option<super::git_view::ClientGitView>,
     pub(super) git_view_generation: u64,
+    /// The Board, shown in place of the focused space's panes.
+    pub(super) board_view: Option<super::board_view::ClientBoardView>,
+    pub(super) board_view_generation: u64,
+    /// A retarget made a new Board that the next tick loads.
+    pub(super) board_view_needs_load: bool,
+    /// Projects whose Board shows the kanban view (the list is the default).
+    pub(super) board_kanban_roots: std::collections::BTreeSet<String>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
     pub(super) link_hover: Option<super::link_hover::LinkHover>,
@@ -1153,6 +1167,10 @@ impl ClientShellState {
             overlay,
             git_view: None,
             git_view_generation: 0,
+            board_view: None,
+            board_view_generation: 0,
+            board_view_needs_load: false,
+            board_kanban_roots: preferences.board_kanban_roots.iter().cloned().collect(),
             previous_pane_id: None,
             pane_mouse_gesture: None,
             link_hover: None,
@@ -1666,6 +1684,7 @@ impl ClientShellState {
         self.snapshot = Some(snapshot);
         self.reconcile_pending_workspace_highlight();
         self.retarget_git_view();
+        self.retarget_board_view();
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
             let matching = self.snapshot.as_ref().is_some_and(|snapshot| {
