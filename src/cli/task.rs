@@ -7,7 +7,7 @@ use crate::api::schema::{
 
 use super::projection::{self, Leaf, ParseError};
 
-const LEAVES: [Leaf; 5] = [
+const LEAVES: [Leaf; 6] = [
     Leaf {
         name: "list",
         about: "List the space's Backlog.md tasks",
@@ -50,6 +50,17 @@ const LEAVES: [Leaf; 5] = [
             let mut params = TaskUpdateProjection::from_matches(matches)?;
             default_to_caller(&params.workspace_id, &mut params.pane_id);
             Ok(Method::TaskUpdate(params))
+        },
+    },
+    Leaf {
+        name: "archive",
+        about: "Move a task to the project's archive",
+        id: "cli:task:archive",
+        arguments: TaskGetProjection::arguments,
+        method: |matches| {
+            let mut params = TaskGetProjection::from_matches(matches)?;
+            default_to_caller(&params.workspace_id, &mut params.pane_id);
+            Ok(Method::TaskArchive(params))
         },
     },
     Leaf {
@@ -140,6 +151,25 @@ mod tests {
             serde_json::json!({"id":"cli:task:update","method":"task.update","params":{
                 "workspace_id":"1","id":"TASK-3","fingerprint":"abc","status":"Done",
                 "assignees":[],"check_ac":[2]}})
+        );
+        assert_eq!(
+            parse(&[
+                "update",
+                "TASK-3",
+                "--summary",
+                "Adds X",
+                "--add-ref",
+                "https://github.com/o/r/pull/1",
+                "--workspace",
+                "1"
+            ]),
+            serde_json::json!({"id":"cli:task:update","method":"task.update","params":{
+                "workspace_id":"1","id":"TASK-3","final_summary":"Adds X",
+                "add_references":["https://github.com/o/r/pull/1"]}})
+        );
+        assert_eq!(
+            parse(&["archive", "TASK-4", "--workspace", "1"]),
+            serde_json::json!({"id":"cli:task:archive","method":"task.archive","params":{"workspace_id":"1","id":"TASK-4"}})
         );
         let args: Vec<String> = ["update", "TASK-3", "--check-ac", "x"]
             .iter()

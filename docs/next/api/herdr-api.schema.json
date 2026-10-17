@@ -4878,6 +4878,13 @@
                 "null"
               ]
             },
+            "final_summary": {
+              "description": "The final summary shown when the task is in Review: what changed,\nhow to try it, and any risks. Replaces the previous one.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "fingerprint": {
               "description": "The task's `fingerprint` as last read. When given and the task\nchanged since, nothing is written and the error is `task_conflict`.",
               "type": [
@@ -6630,6 +6637,38 @@
           "properties": {
             "method": {
               "const": "task.stamp",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TaskTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "task.archive",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TaskGetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "task.add_workflow",
               "type": "string"
             },
             "params": {

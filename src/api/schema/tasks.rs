@@ -153,6 +153,10 @@ cli_params! {
         /// A comment to append.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub comment: Option<String> => Field::new(None).input(optional_text("comment", "TEXT").order(13)),
+        /// The final summary shown when the task is in Review: what changed,
+        /// how to try it, and any risks. Replaces the previous one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub final_summary: Option<String> => Field::new(None).input(optional_text("summary", "TEXT").order(16)),
         /// References (URLs or files) to add, such as the task's pull request.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub add_references: Vec<String> => Field::new(Vec::new()).input(texts("add-ref", "URL").order(15)),

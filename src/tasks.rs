@@ -23,8 +23,18 @@ const TIMEOUT: Duration = Duration::from_secs(50);
 const MAX_OUTPUT_BYTES: usize = 32 << 20;
 /// Hex digits of a file's sha256 kept as its fingerprint.
 const FINGERPRINT_LEN: usize = 16;
-/// The columns a project initialized from herdr starts with.
-const INITIAL_STATUSES: [&str; 4] = ["To Do", "In Progress", "Review", "Done"];
+/// The columns a project initialized from herdr starts with: the workflow
+/// where people promote proposed tasks and approve reviews, and agents do
+/// the rest. Not "Draft": Backlog.md moves a task with that status into its
+/// drafts folder under a new ID.
+const INITIAL_STATUSES: [&str; 6] = [
+    "Backlog",
+    "To Do",
+    "In Progress",
+    "Review",
+    "Blocked",
+    "Done",
+];
 /// Backlog.md's own default, for a config without a `statuses` line.
 const DEFAULT_STATUSES: [&str; 3] = ["To Do", "In Progress", "Done"];
 
@@ -36,6 +46,10 @@ pub(crate) enum TaskError {
     NotFound(String),
     /// The task changed since the caller read it; nothing was written.
     Conflict,
+    /// An agent asked for a move that is a person's to make.
+    Refused(String),
+    /// An agent asked to put a task in Review without a pull request link.
+    NeedsPullRequest(String),
     Rejected(String),
     Failed(String),
 }
@@ -48,6 +62,8 @@ impl TaskError {
             Self::AlreadyInitialized => "backlog_already_initialized",
             Self::NotFound(_) => "task_not_found",
             Self::Conflict => "task_conflict",
+            Self::Refused(_) => "workflow_refused",
+            Self::NeedsPullRequest(_) => "review_needs_pr",
             Self::Rejected(_) => "invalid_request",
             Self::Failed(_) => "backlog_failed",
         }
@@ -60,7 +76,12 @@ impl TaskError {
             Self::AlreadyInitialized => "this folder already has a Backlog.md project".to_owned(),
             Self::NotFound(id) => format!("task {id} not found"),
             Self::Conflict => "the task changed since it was read; reload and try again".to_owned(),
-            Self::Rejected(message) | Self::Failed(message) => message.clone(),
+            Self::NeedsPullRequest(id) => format!(
+                "{id} needs a pull request link before Review: add one with --add-ref <url>"
+            ),
+            Self::Refused(message) | Self::Rejected(message) | Self::Failed(message) => {
+                message.clone()
+            }
         }
     }
 }
@@ -102,12 +123,32 @@ pub(crate) fn get(folder: &Path, id: &str) -> Result<TaskDetail> {
     project.detail(id)
 }
 
-pub(crate) fn create(folder: &Path, params: &TaskCreateParams) -> Result<TaskDetail> {
+/// `agent` names the agent asking, when an agent's pane asked: its tasks
+/// start in Backlog, where a person promotes them.
+pub(crate) fn create(
+    folder: &Path,
+    params: &TaskCreateParams,
+    agent: Option<&str>,
+) -> Result<TaskDetail> {
     let project = Project::find(folder)?;
     let title = checked_text("title", &params.title)?;
+    let mut status = params.status.clone();
+    if agent.is_some() {
+        if let Some(backlog) = project.status_for(Stage::Backlog) {
+            if status
+                .as_deref()
+                .is_some_and(|wanted| stage(wanted) != Some(Stage::Backlog))
+            {
+                return Err(TaskError::Refused(
+                    "agents create tasks in Backlog; a person promotes them to To Do".to_owned(),
+                ));
+            }
+            status = Some(backlog);
+        }
+    }
     let mut args = vec!["task".to_owned(), "create".to_owned()];
     push_opt(&mut args, "-d", params.description.as_deref());
-    push_opt(&mut args, "-s", params.status.as_deref());
+    push_opt(&mut args, "-s", status.as_deref());
     push_opt(&mut args, "--priority", params.priority.as_deref());
     push_opt(&mut args, "--type", params.task_type.as_deref());
     push_all(&mut args, "-a", &params.assignees);
@@ -125,7 +166,14 @@ pub(crate) fn create(folder: &Path, params: &TaskCreateParams) -> Result<TaskDet
     project.detail(id)
 }
 
-pub(crate) fn update(folder: &Path, params: &TaskUpdateParams) -> Result<TaskDetail> {
+/// `agent` names the agent asking, when an agent's pane asked: it may only
+/// make an agent's status moves (see [`agent_may_move`]), and its comments
+/// are signed with its name unless they name an author.
+pub(crate) fn update(
+    folder: &Path,
+    params: &TaskUpdateParams,
+    agent: Option<&str>,
+) -> Result<TaskDetail> {
     let project = Project::find(folder)?;
     let mut args = vec!["task".to_owned(), "edit".to_owned(), params.id.clone()];
     push_opt(&mut args, "-s", params.status.as_deref());
@@ -147,15 +195,21 @@ pub(crate) fn update(folder: &Path, params: &TaskUpdateParams) -> Result<TaskDet
         args.extend(["--uncheck-ac".to_owned(), index.to_string()]);
     }
     push_all(&mut args, "--add-ref", &params.add_references);
+    push_opt(
+        &mut args,
+        "--final-summary",
+        params.final_summary.as_deref(),
+    );
     if let Some(comment) = &params.comment {
         args.extend([
             "--comment".to_owned(),
             checked_text("comment", comment)?.to_owned(),
         ]);
+        let signed = agent.map(|agent| format!("@{}", agent.trim_start_matches('@')));
         push_opt(
             &mut args,
             "--comment-author",
-            params.comment_author.as_deref(),
+            params.comment_author.as_deref().or(signed.as_deref()),
         );
     }
     if args.len() == 3 {
@@ -170,9 +224,56 @@ pub(crate) fn update(folder: &Path, params: &TaskUpdateParams) -> Result<TaskDet
         {
             return Err(TaskError::Conflict);
         }
+        if let (Some(_), Some(to)) = (agent, params.status.as_deref()) {
+            check_agent_move(&params.id, &file, to, &params.add_references)?;
+        }
         backlog(&project.root, &args).map(drop)
     })?;
     project.detail(&params.id)
+}
+
+/// Moves a task to the project's archive, out of the board.
+pub(crate) fn archive(folder: &Path, id: &str) -> Result<TaskBoardInfo> {
+    let project = Project::find(folder)?;
+    locked(&project.root, || {
+        let file = project.file(id)?;
+        backlog(&project.root, &["task", "archive", file.id.as_str()]).map(drop)
+    })?;
+    list(folder)
+}
+
+/// Adds the workflow's columns a project lacks: Backlog first, Review and
+/// Blocked before its last column. Existing columns stay as they are.
+pub(crate) fn add_workflow(folder: &Path) -> Result<TaskBoardInfo> {
+    let project = Project::find(folder)?;
+    locked(&project.root, || {
+        let mut statuses = project.statuses();
+        let has = |statuses: &[String], wanted: Stage| {
+            statuses.iter().any(|status| stage(status) == Some(wanted))
+        };
+        if !has(&statuses, Stage::Backlog) {
+            statuses.insert(0, "Backlog".to_owned());
+        }
+        for (wanted, name) in [(Stage::Review, "Review"), (Stage::Blocked, "Blocked")] {
+            if !has(&statuses, wanted) {
+                let before_last = statuses.len().saturating_sub(1).max(1);
+                statuses.insert(before_last, name.to_owned());
+            }
+        }
+        write_statuses(&project.config, &statuses)
+    })?;
+    list(folder)
+}
+
+fn write_statuses(config: &Path, statuses: &[String]) -> Result<()> {
+    let text = std::fs::read_to_string(config).map_err(io_failed)?;
+    let list = statuses
+        .iter()
+        .map(|status| format!("\"{status}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let text = set_config_line(&text, "statuses", &format!("[{list}]"));
+    std::fs::write(config, text).map_err(io_failed)
 }
 
 /// Starts a Backlog.md project in `folder` with herdr's columns.
@@ -198,13 +299,10 @@ pub(crate) fn init(folder: &Path) -> Result<TaskBoardInfo> {
     }
     locked(folder, || backlog(folder, &args))?;
     let project = Project::find(folder)?;
+    write_statuses(&project.config, &INITIAL_STATUSES.map(str::to_owned))?;
+    // New tasks wait in Backlog until a person promotes them.
     let config = std::fs::read_to_string(&project.config).map_err(io_failed)?;
-    let statuses = INITIAL_STATUSES
-        .iter()
-        .map(|status| format!("\"{status}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let config = set_config_line(&config, "statuses", &format!("[{statuses}]"));
+    let config = set_config_line(&config, "default_status", "\"Backlog\"");
     std::fs::write(&project.config, config).map_err(io_failed)?;
     list(folder)
 }
@@ -281,6 +379,13 @@ impl Project {
         }
     }
 
+    /// The project's own name for a workflow stage, when it has one.
+    fn status_for(&self, wanted: Stage) -> Option<String> {
+        self.statuses()
+            .into_iter()
+            .find(|status| stage(status) == Some(wanted))
+    }
+
     fn file(&self, id: &str) -> Result<TaskFile> {
         scan(&self.tasks)
             .remove(&id.trim().to_ascii_uppercase())
@@ -319,7 +424,9 @@ fn locked<T>(root: &Path, work: impl FnOnce() -> Result<T>) -> Result<T> {
 struct TaskFile {
     id: String,
     fingerprint: String,
+    status: String,
     dependencies: Vec<String>,
+    references: Vec<String>,
     description_preview: Option<String>,
 }
 
@@ -338,13 +445,15 @@ fn scan(dir: &Path) -> HashMap<String, TaskFile> {
             let mut fingerprint = crate::checksum::to_lower_hex(&digest);
             fingerprint.truncate(FINGERPRINT_LEN);
             let text = String::from_utf8_lossy(&bytes);
-            let (id, dependencies) = frontmatter(&text)?;
+            let header = frontmatter(&text)?;
             Some((
-                id.to_ascii_uppercase(),
+                header.id.to_ascii_uppercase(),
                 TaskFile {
-                    id,
+                    id: header.id,
                     fingerprint,
-                    dependencies,
+                    status: header.status,
+                    dependencies: header.dependencies,
+                    references: header.references,
                     description_preview: description_preview(&text),
                 },
             ))
@@ -352,41 +461,137 @@ fn scan(dir: &Path) -> HashMap<String, TaskFile> {
         .collect()
 }
 
-/// A task file's `id` and `dependencies`, from its YAML frontmatter.
-fn frontmatter(text: &str) -> Option<(String, Vec<String>)> {
+/// What the Board reads from a task file's YAML frontmatter itself.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Frontmatter {
+    id: String,
+    status: String,
+    dependencies: Vec<String>,
+    references: Vec<String>,
+}
+
+impl Frontmatter {
+    fn list(&mut self, key: &str) -> &mut Vec<String> {
+        if key == "dependencies" {
+            &mut self.dependencies
+        } else {
+            &mut self.references
+        }
+    }
+}
+
+fn frontmatter(text: &str) -> Option<Frontmatter> {
     let mut lines = text.lines();
     if lines.next()?.trim_end() != "---" {
         return None;
     }
-    let mut id = None;
-    let mut dependencies = Vec::new();
-    let mut in_dependencies = false;
+    let mut header = Frontmatter::default();
+    // The list a `key:` line on its own opened, filled by the `- item` lines after it.
+    let mut open: Option<&str> = None;
     for line in lines {
         if line.trim_end() == "---" {
             break;
         }
-        if in_dependencies {
+        if let Some(key) = open {
             if let Some(item) = line.trim_start().strip_prefix("- ") {
-                dependencies.push(unquote(item));
+                header.list(key).push(unquote(item));
                 continue;
             }
             if line.starts_with([' ', '\t']) {
                 continue;
             }
-            in_dependencies = false;
+            open = None;
         }
-        if let Some(value) = line.strip_prefix("id:") {
-            id = Some(unquote(value));
-        } else if let Some(value) = line.strip_prefix("dependencies:") {
-            let value = value.trim();
-            if value.is_empty() {
-                in_dependencies = true;
-            } else {
-                dependencies = flow_list(value);
-            }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        match key {
+            "id" => header.id = unquote(value),
+            "status" => header.status = unquote(value),
+            "dependencies" | "references" if value.is_empty() => open = Some(key),
+            "dependencies" | "references" => *header.list(key) = flow_list(value),
+            _ => {}
         }
     }
-    id.filter(|id| !id.is_empty()).map(|id| (id, dependencies))
+    (!header.id.is_empty()).then_some(header)
+}
+
+/// The workflow's steps, by the usual Backlog.md status names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    /// Proposed, waiting for a person to promote it to To Do.
+    Backlog,
+    ToDo,
+    InProgress,
+    Review,
+    Blocked,
+    Done,
+}
+
+fn stage(status: &str) -> Option<Stage> {
+    Some(match status.trim().to_ascii_lowercase().as_str() {
+        "backlog" => Stage::Backlog,
+        "to do" | "todo" => Stage::ToDo,
+        "in progress" | "doing" => Stage::InProgress,
+        "review" | "in review" => Stage::Review,
+        "blocked" => Stage::Blocked,
+        "done" => Stage::Done,
+        _ => return None,
+    })
+}
+
+/// The moves that are an agent's: picking work up, handing it back, sending
+/// it to Review, and stopping on a problem. Promoting from Backlog, approving,
+/// sending work back from Review and unblocking are a person's. Statuses
+/// outside the workflow's names are not ruled on.
+fn agent_may_move(from: Stage, to: Stage) -> bool {
+    use Stage::*;
+    from == to
+        || matches!(
+            (from, to),
+            (ToDo, InProgress)
+                | (InProgress, ToDo)
+                | (InProgress, Review)
+                | (ToDo | InProgress, Blocked)
+        )
+}
+
+fn check_agent_move(id: &str, file: &TaskFile, to: &str, adding: &[String]) -> Result<()> {
+    let (Some(from), Some(target)) = (stage(&file.status), stage(to)) else {
+        return Ok(());
+    };
+    if !agent_may_move(from, target) {
+        let why = match (from, target) {
+            (Stage::Backlog, _) => "only a person promotes a task out of Backlog",
+            (_, Stage::Done) => "only a person approves a task into Done",
+            (Stage::Review, _) => "a person approves or sends back a task in Review",
+            (Stage::Blocked, _) => "only a person unblocks a task",
+            _ => "agents move tasks To Do → In Progress → Review, or to Blocked",
+        };
+        return Err(TaskError::Refused(format!(
+            "{id}: {} → {to} is not an agent's move ({why})",
+            file.status
+        )));
+    }
+    if target == Stage::Review
+        && from != Stage::Review
+        && !file
+            .references
+            .iter()
+            .chain(adding)
+            .any(|reference| is_pull_request(reference))
+    {
+        return Err(TaskError::NeedsPullRequest(id.to_owned()));
+    }
+    Ok(())
+}
+
+/// A pull or merge request link on GitHub, GitLab or Bitbucket.
+pub(crate) fn is_pull_request(reference: &str) -> bool {
+    ["/pull/", "/merge_requests/", "/pull-requests/"]
+        .iter()
+        .any(|marker| reference.contains(marker))
 }
 
 /// Most characters of a description kept for a card.
@@ -647,20 +852,63 @@ mod tests {
     #[test]
     fn frontmatter_reads_id_and_both_dependency_styles() {
         let block = "---\nid: TASK-2\ntitle: Two\ndependencies:\n  - TASK-1\n  - 'task-3'\nordinal: 2\n---\nbody\n";
-        assert_eq!(
-            frontmatter(block),
-            Some(("TASK-2".into(), vec!["TASK-1".into(), "task-3".into()]))
-        );
-        let flow = "---\r\nid: 'T-9'\r\ndependencies: [T-1, \"T-2\"]\r\n---\r\n";
-        assert_eq!(
-            frontmatter(flow),
-            Some(("T-9".into(), vec!["T-1".into(), "T-2".into()]))
-        );
-        assert_eq!(
-            frontmatter("---\nid: X-1\ndependencies: []\n---\n"),
-            Some(("X-1".into(), vec![]))
-        );
+        let header = frontmatter(block).unwrap();
+        assert_eq!(header.id, "TASK-2");
+        assert_eq!(header.dependencies, ["TASK-1", "task-3"]);
+        let flow = "---\r\nid: 'T-9'\r\nstatus: In Progress\r\ndependencies: [T-1, \"T-2\"]\r\nreferences:\r\n  - 'https://github.com/o/r/pull/3'\r\n---\r\n";
+        let header = frontmatter(flow).unwrap();
+        assert_eq!(header.id, "T-9");
+        assert_eq!(header.status, "In Progress");
+        assert_eq!(header.dependencies, ["T-1", "T-2"]);
+        assert_eq!(header.references, ["https://github.com/o/r/pull/3"]);
+        let empty = frontmatter("---\nid: X-1\ndependencies: []\n---\n").unwrap();
+        assert!(empty.dependencies.is_empty());
         assert_eq!(frontmatter("no frontmatter"), None);
+    }
+
+    #[test]
+    fn agents_make_only_their_own_moves_and_review_needs_a_pull_request() {
+        use Stage::*;
+        for (from, to) in [
+            (ToDo, InProgress),
+            (InProgress, Review),
+            (InProgress, Blocked),
+            (InProgress, ToDo),
+        ] {
+            assert!(agent_may_move(from, to), "{from:?} → {to:?}");
+        }
+        for (from, to) in [
+            (Backlog, ToDo),
+            (Review, Done),
+            (Review, InProgress),
+            (Blocked, ToDo),
+            (ToDo, Done),
+        ] {
+            assert!(!agent_may_move(from, to), "{from:?} → {to:?}");
+        }
+        let file = |status: &str, references: Vec<String>| TaskFile {
+            id: "T-1".into(),
+            fingerprint: String::new(),
+            status: status.into(),
+            dependencies: Vec::new(),
+            references,
+            description_preview: None,
+        };
+        assert_eq!(
+            check_agent_move("T-1", &file("In Progress", Vec::new()), "Review", &[]),
+            Err(TaskError::NeedsPullRequest("T-1".into()))
+        );
+        let pr = "https://github.com/o/r/pull/3".to_owned();
+        assert!(
+            check_agent_move("T-1", &file("In Progress", vec![pr.clone()]), "Review", &[]).is_ok()
+        );
+        assert!(check_agent_move("T-1", &file("In Progress", Vec::new()), "review", &[pr]).is_ok());
+        assert!(matches!(
+            check_agent_move("T-1", &file("Backlog", Vec::new()), "To Do", &[]),
+            Err(TaskError::Refused(message)) if message.contains("promotes")
+        ));
+        // Custom statuses are not ruled on.
+        assert!(check_agent_move("T-1", &file("Triage", Vec::new()), "Shipped", &[]).is_ok());
     }
 
     #[test]
@@ -740,16 +988,18 @@ mod tests {
                     acceptance_criteria: vec!["works".into()],
                     ..TaskCreateParams::default()
                 },
+                None,
             )
             .unwrap();
             assert_eq!(first.summary.title, "--looks like a flag");
-            assert_eq!(first.summary.status, "To Do");
+            assert_eq!(first.summary.status, "Backlog", "new tasks wait in Backlog");
             let second = create(
                 &dir,
                 &TaskCreateParams {
                     dependencies: vec![first.summary.id.clone()],
                     ..create_params("Second")
                 },
+                None,
             )
             .unwrap();
 
@@ -759,6 +1009,7 @@ mod tests {
                     description: Some("Child work".into()),
                     ..create_params("Child")
                 },
+                None,
             )
             .unwrap();
             // Subtasks come from Backlog.md's own --parent; created here through the CLI.
@@ -807,6 +1058,7 @@ mod tests {
                     add_references: vec!["https://github.com/o/r/pull/7".into()],
                     ..TaskUpdateParams::default()
                 },
+                None,
             )
             .unwrap();
             assert_eq!(moved.summary.status, "Review");
@@ -832,6 +1084,7 @@ mod tests {
                     status: Some("Done".into()),
                     ..TaskUpdateParams::default()
                 },
+                None,
             );
             assert_eq!(stale, Err(TaskError::Conflict));
             assert_eq!(
@@ -846,10 +1099,116 @@ mod tests {
                     status: Some("Nope".into()),
                     ..TaskUpdateParams::default()
                 },
+                None,
             );
             assert!(matches!(bad_status, Err(TaskError::Rejected(_))));
             assert!(matches!(get(&dir, "TASK-999"), Err(TaskError::NotFound(_))));
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn agents_follow_the_workflow_and_people_promote_and_approve() {
+            if !available() {
+                return;
+            }
+            let dir = folder("workflow");
+            init(&dir).unwrap();
+            let agent = Some("claude");
+            let update_as = |agent: Option<&str>, id: &str, edit: TaskUpdateParams| {
+                update(
+                    &dir,
+                    &TaskUpdateParams {
+                        id: id.into(),
+                        ..edit
+                    },
+                    agent,
+                )
+            };
+            let status = |status: &str| TaskUpdateParams {
+                status: Some(status.into()),
+                ..TaskUpdateParams::default()
+            };
+
+            let task = create(&dir, &create_params("Agent idea"), agent).unwrap();
+            let id = task.summary.id.clone();
+            assert_eq!(task.summary.status, "Backlog");
+            assert!(matches!(
+                create(
+                    &dir,
+                    &TaskCreateParams {
+                        status: Some("To Do".into()),
+                        ..create_params("Sneaky")
+                    },
+                    agent
+                ),
+                Err(TaskError::Refused(_))
+            ));
+            assert!(matches!(
+                update_as(agent, &id, status("To Do")),
+                Err(TaskError::Refused(_))
+            ));
+            // A person promotes it; the agent picks it up.
+            update_as(None, &id, status("To Do")).unwrap();
+            update_as(agent, &id, status("In Progress")).unwrap();
+            assert_eq!(
+                update_as(agent, &id, status("Review")),
+                Err(TaskError::NeedsPullRequest(id.clone()))
+            );
+            let reviewed = update_as(
+                agent,
+                &id,
+                TaskUpdateParams {
+                    add_references: vec!["https://github.com/o/r/pull/9".into()],
+                    final_summary: Some("Adds the thing".into()),
+                    comment: Some("Ready".into()),
+                    ..status("Review")
+                },
+            )
+            .unwrap();
+            assert_eq!(reviewed.summary.status, "Review");
+            assert_eq!(reviewed.final_summary.as_deref(), Some("Adds the thing"));
+            assert_eq!(reviewed.comments[0].author.as_deref(), Some("@claude"));
+            assert!(matches!(
+                update_as(agent, &id, status("Done")),
+                Err(TaskError::Refused(_))
+            ));
+            // A person approves; a proposal nobody wants is archived off the board.
+            update_as(None, &id, status("Done")).unwrap();
+            let unwanted = create(&dir, &create_params("Not needed"), agent).unwrap();
+            let board = archive(&dir, &unwanted.summary.id).unwrap();
+            assert!(board
+                .tasks
+                .iter()
+                .all(|task| task.id != unwanted.summary.id));
+            assert!(board.tasks.iter().any(|task| task.id == id));
+
+            // A project set up outside herdr gets the missing columns.
+            let plain = folder("plain");
+            backlog(
+                &plain,
+                &[
+                    "init",
+                    "plain",
+                    "--defaults",
+                    "--no-git",
+                    "--integration-mode",
+                    "none",
+                ],
+            )
+            .unwrap();
+            assert_eq!(
+                add_workflow(&plain).unwrap().statuses,
+                [
+                    "Backlog",
+                    "To Do",
+                    "In Progress",
+                    "Review",
+                    "Blocked",
+                    "Done"
+                ]
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::fs::remove_dir_all(&plain);
         }
 
         #[test]
@@ -860,7 +1219,7 @@ mod tests {
             let (one, two) = (folder("one"), folder("two"));
             init(&one).unwrap();
             init(&two).unwrap();
-            create(&one, &create_params("Only in one")).unwrap();
+            create(&one, &create_params("Only in one"), None).unwrap();
             assert_eq!(list(&one).unwrap().tasks.len(), 1);
             assert!(list(&two).unwrap().tasks.is_empty());
             // A subfolder belongs to the project above it.

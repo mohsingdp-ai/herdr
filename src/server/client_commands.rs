@@ -332,7 +332,7 @@ mod tests {
         );
         assert_eq!(
             actual.remove("task.update").as_deref(),
-            Some("8fc83b07aedfed4f0685b1e6ffe47491d9554426cba0149340a3e44e8d4e2071")
+            Some("203b4620e24a828510f1585bceaa1e42b97e8b4f8a16f8afb09808645e3328ec")
         );
         assert_eq!(
             actual.remove("task.init").as_deref(),
@@ -341,6 +341,14 @@ mod tests {
         assert_eq!(
             actual.remove("task.stamp").as_deref(),
             Some("34fa57743b7ba986ea5d12600d196c1c9b99e00c7e6dda22ec518ed5ebd77278")
+        );
+        assert_eq!(
+            actual.remove("task.archive").as_deref(),
+            Some("56274c9b47ff5c4255e44372537762ddb4aa075d6f88f95177a6b387a8fd6678")
+        );
+        assert_eq!(
+            actual.remove("task.add_workflow").as_deref(),
+            Some("df6cb17346d0fc768dba71a936655053798fb2393c7011de543775c9e9662de8")
         );
 
         assert_eq!(

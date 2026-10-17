@@ -1134,7 +1134,9 @@ impl App {
             | Method::TaskCreate(_)
             | Method::TaskUpdate(_)
             | Method::TaskInit(_)
-            | Method::TaskStamp(_) => {
+            | Method::TaskStamp(_)
+            | Method::TaskArchive(_)
+            | Method::TaskAddWorkflow(_) => {
                 return responses::encode_error(
                     request.id,
                     "invalid_request",

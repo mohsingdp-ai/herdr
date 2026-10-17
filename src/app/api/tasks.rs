@@ -18,6 +18,8 @@ pub(crate) fn is_task_method(method: &Method) -> bool {
             | Method::TaskUpdate(_)
             | Method::TaskInit(_)
             | Method::TaskStamp(_)
+            | Method::TaskArchive(_)
+            | Method::TaskAddWorkflow(_)
     )
 }
 
@@ -40,8 +42,15 @@ impl App {
         let id = request.id;
         let writes = matches!(
             request.method,
-            Method::TaskCreate(_) | Method::TaskUpdate(_) | Method::TaskInit(_)
+            Method::TaskCreate(_)
+                | Method::TaskUpdate(_)
+                | Method::TaskInit(_)
+                | Method::TaskArchive(_)
+                | Method::TaskAddWorkflow(_)
         );
+        // An agent's request (its pane runs a detected agent) follows the
+        // workflow's agent rules; the Board and a person's shell do not.
+        let agent = self.caller_agent(&request.method);
         let (workspace_id, pane_id, work): (Option<String>, Option<String>, TaskWork) =
             match request.method {
                 Method::TaskList(target) => (
@@ -69,12 +78,26 @@ impl App {
                 Method::TaskCreate(params) => (
                     params.workspace_id.clone(),
                     params.pane_id.clone(),
-                    Box::new(move |folder| tasks::create(&folder, &params).map(detail)),
+                    Box::new(move |folder| {
+                        tasks::create(&folder, &params, agent.as_deref()).map(detail)
+                    }),
                 ),
                 Method::TaskUpdate(params) => (
                     params.workspace_id.clone(),
                     params.pane_id.clone(),
-                    Box::new(move |folder| tasks::update(&folder, &params).map(detail)),
+                    Box::new(move |folder| {
+                        tasks::update(&folder, &params, agent.as_deref()).map(detail)
+                    }),
+                ),
+                Method::TaskArchive(params) => (
+                    params.workspace_id,
+                    params.pane_id,
+                    Box::new(move |folder| tasks::archive(&folder, &params.id).map(board)),
+                ),
+                Method::TaskAddWorkflow(target) => (
+                    target.workspace_id,
+                    target.pane_id,
+                    Box::new(|folder| tasks::add_workflow(&folder).map(board)),
                 ),
                 _ => {
                     let _ =
@@ -125,6 +148,18 @@ impl App {
         if let Err(err) = spawned {
             let _ = respond_to.send(encode_error(id, "spawn_failed", err.to_string()));
         }
+    }
+
+    /// The agent running in the pane a request names, if any. Only a pane
+    /// named by the request counts, never the focused one.
+    fn caller_agent(&self, method: &Method) -> Option<String> {
+        let pane_id = match method {
+            Method::TaskCreate(params) => params.pane_id.as_deref(),
+            Method::TaskUpdate(params) => params.pane_id.as_deref(),
+            _ => None,
+        }?;
+        let (workspace_index, pane) = self.resolve_optional_pane(Some(pane_id))?;
+        self.pane_metadata(workspace_index, pane)?.agent
     }
 
     /// Tasks belong to a space: a pane's tasks are its workspace's, so an
