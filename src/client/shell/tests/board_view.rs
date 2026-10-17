@@ -129,6 +129,10 @@ fn task(id: &str, title: &str, status: &str) -> TaskSummary {
         assignees: vec!["@developer".into()],
         labels: Vec::new(),
         dependencies: Vec::new(),
+        parent_id: None,
+        milestone: None,
+        references: Vec::new(),
+        description_preview: None,
         acceptance_criteria_checked: 0,
         acceptance_criteria_total: 1,
         fingerprint: format!("fp-{id}"),
@@ -364,15 +368,15 @@ fn kanban() -> ClientShellState {
 }
 
 #[test]
-fn kanban_shows_a_column_per_status_with_boxed_cards() {
+fn kanban_shows_a_column_per_status_with_cards() {
     let mut state = kanban();
     let text = screen(&mut state, 150);
-    for column in [" To Do  1 ", " In Progress  1 ", " Review  0 ", " Done  0 "] {
+    for column in ["To Do  1 ", "In Progress  1 ", "Review  0 ", "Done  0 "] {
         assert!(text.contains(column), "{column}: {text}");
     }
     assert!(text.contains("Design the login"), "{text}");
     assert!(text.contains("● Developer"), "{text}");
-    assert!(text.contains("✓0/1"), "{text}");
+    assert!(text.contains("✓ 0/1"), "{text}");
     assert!(text.contains("No tasks"), "{text}");
 }
 
@@ -731,4 +735,188 @@ fn a_space_set_up_elsewhere_shows_its_board() {
         .expect("the list is read once the project exists");
     answer(&mut state, list, Ok(board()));
     assert!(screen(&mut state, 150).contains("▾ To Do 1"));
+}
+
+fn rich_board() -> ResponseResult {
+    let mut tasks = Vec::new();
+    let mut add = |id: &str,
+                   title: &str,
+                   status: &str,
+                   kind: Option<&str>,
+                   parent: Option<&str>,
+                   prio: Option<&str>| {
+        let mut t = task(id, title, status);
+        t.task_type = kind.map(str::to_owned);
+        t.parent_id = parent.map(str::to_owned);
+        t.priority = prio.map(str::to_owned);
+        t.acceptance_criteria_total = 0;
+        if parent.is_some() {
+            t.assignees.clear();
+        }
+        tasks.push(t);
+    };
+    add(
+        "PAY-101",
+        "Create Payment API",
+        "To Do",
+        Some("feature"),
+        None,
+        Some("high"),
+    );
+    for (i, t) in [
+        "Design API schema",
+        "Implement endpoint",
+        "Add validation",
+        "Write unit tests",
+        "Load test",
+    ]
+    .iter()
+    .enumerate()
+    {
+        add(
+            &format!("PAY-101.{}", i + 1),
+            t,
+            "To Do",
+            None,
+            Some("PAY-101"),
+            Some("medium"),
+        );
+    }
+    add(
+        "PAY-103",
+        "Handle duplicate payments",
+        "To Do",
+        Some("bug"),
+        None,
+        Some("medium"),
+    );
+    add(
+        "PAY-105",
+        "Frontend Payment Form",
+        "In Progress",
+        Some("feature"),
+        None,
+        Some("high"),
+    );
+    add(
+        "PAY-105.1",
+        "Design form layout",
+        "Done",
+        None,
+        Some("PAY-105"),
+        Some("high"),
+    );
+    add(
+        "PAY-105.2",
+        "Implement form UI",
+        "In Progress",
+        None,
+        Some("PAY-105"),
+        Some("medium"),
+    );
+    add(
+        "PAY-105.3",
+        "Add form validation",
+        "To Do",
+        None,
+        Some("PAY-105"),
+        Some("medium"),
+    );
+    add(
+        "PAY-107",
+        "Payment Method Selection",
+        "Review",
+        Some("feature"),
+        None,
+        Some("medium"),
+    );
+    tasks[0].description_preview =
+        Some("Implement the main payment creation endpoint with validation and idempotency".into());
+    tasks[7].description_preview = Some("Implement payment creation UI".into());
+    tasks[11].references = vec!["https://github.com/o/r/pull/42".into()];
+    tasks[11].acceptance_criteria_total = 4;
+    tasks[11].acceptance_criteria_checked = 3;
+    ResponseResult::TaskList {
+        board: TaskBoardInfo {
+            root: "/repo".into(),
+            statuses: vec![
+                "To Do".into(),
+                "In Progress".into(),
+                "Review".into(),
+                "Done".into(),
+            ],
+            tasks,
+            stamp: String::new(),
+        },
+    }
+}
+
+fn rich() -> ClientShellState {
+    let mut state = state();
+    let opened = open_by_tab(&mut state);
+    answer(&mut state, &opened[0], Ok(rich_board()));
+    screen(&mut state, 160);
+    state
+}
+
+#[test]
+fn list_shows_subtasks_as_a_tree_under_their_parent_and_folds_them() {
+    let mut state = rich();
+    let text = screen(&mut state, 160);
+    assert!(
+        text.contains("▾ PAY-101      Create Payment API (5)"),
+        "{text}"
+    );
+    assert!(text.contains("├─ PAY-101.1"), "{text}");
+    assert!(text.contains("└─ PAY-101.5"), "{text}");
+    // A subtask stays under its parent whatever its own status.
+    assert!(text.contains("├─ PAY-105.1"), "{text}");
+    assert!(
+        text.contains("▾ To Do 2"),
+        "only parents count in a group: {text}"
+    );
+    assert!(text.contains(" Feature "), "{text}");
+
+    let fold = target(&state, &BoardTarget::FoldTask("PAY-101".into()));
+    click(&mut state, fold);
+    let text = screen(&mut state, 160);
+    assert!(text.contains("▸ PAY-101"), "{text}");
+    assert!(!text.contains("PAY-101.1"), "{text}");
+}
+
+#[test]
+fn kanban_cards_carry_their_subtasks_and_pull_request() {
+    let mut state = rich();
+    let kanban = target(&state, &BoardTarget::Mode(BoardMode::Kanban));
+    click(&mut state, kanban);
+    let text = screen(&mut state, 160);
+    assert!(
+        text.contains("To Do  2 "),
+        "subtasks are not cards of their own: {text}"
+    );
+    assert!(text.contains("FEATURE  PAY-101"), "{text}");
+    assert!(text.contains("101.1  Design"), "{text}");
+    assert!(text.contains("+1 more"), "{text}");
+    assert!(text.contains("◫ 0/5"), "{text}");
+    assert!(
+        text.contains("Implement the main payment"),
+        "the description shows: {text}"
+    );
+    assert!(text.contains("⎇ PR #42"), "{text}");
+
+    // A subtask's pill moves it to the next status.
+    let pill = target(&state, &BoardTarget::NextStatus("PAY-101.1".into()));
+    let sent = requests(click(&mut state, pill).actions);
+    let params = update_params(&sent);
+    assert_eq!(params.id, "PAY-101.1");
+    assert_eq!(params.status.as_deref(), Some("In Progress"));
+
+    // The pull request opens in the browser.
+    let link = target(
+        &state,
+        &BoardTarget::OpenUrl("https://github.com/o/r/pull/42".into()),
+    );
+    let opened = click(&mut state, link);
+    assert!(opened.actions.iter().any(|action| matches!(action,
+        ClientShellAction::OpenSafeWebUrl(url) if url == "https://github.com/o/r/pull/42")));
 }

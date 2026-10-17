@@ -332,7 +332,7 @@ mod tests {
         );
         assert_eq!(
             actual.remove("task.update").as_deref(),
-            Some("bc9ce7e0f829d917709953077d4a6ad6d4c48eec6f9d2051480a38640f0b7e2b")
+            Some("8fc83b07aedfed4f0685b1e6ffe47491d9554426cba0149340a3e44e8d4e2071")
         );
         assert_eq!(
             actual.remove("task.init").as_deref(),

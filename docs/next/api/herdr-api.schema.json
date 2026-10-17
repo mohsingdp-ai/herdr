@@ -4833,6 +4833,13 @@
         "TaskUpdateParams": {
           "description": "Changes one task. Only the given fields change.",
           "properties": {
+            "add_references": {
+              "description": "References (URLs or files) to add, such as the task's pull request.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "assignees": {
               "description": "Replaces every assignee; an empty list clears them.",
               "items": {
@@ -12238,6 +12245,13 @@
                 "null"
               ]
             },
+            "description_preview": {
+              "description": "The start of the description, for a card.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "final_summary": {
               "type": [
                 "string",
@@ -12270,6 +12284,19 @@
               },
               "type": "array"
             },
+            "milestone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parent_id": {
+              "description": "The task this one is a subtask of.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "path": {
               "description": "The task file, relative to `root`.",
               "type": "string"
@@ -12279,6 +12306,14 @@
                 "string",
                 "null"
               ]
+            },
+            "references": {
+              "default": [],
+              "description": "URLs or files linked to the task, such as its pull request.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "status": {
               "type": "string"
@@ -12331,6 +12366,13 @@
               },
               "type": "array"
             },
+            "description_preview": {
+              "description": "The start of the description, for a card.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "fingerprint": {
               "description": "Changes whenever the task's file changes; pass it back to `task.update`\nto refuse writing over a change made since.",
               "type": "string"
@@ -12345,11 +12387,32 @@
               },
               "type": "array"
             },
+            "milestone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parent_id": {
+              "description": "The task this one is a subtask of.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "priority": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "references": {
+              "default": [],
+              "description": "URLs or files linked to the task, such as its pull request.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "status": {
               "type": "string"

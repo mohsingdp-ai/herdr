@@ -146,6 +146,7 @@ pub(crate) fn update(folder: &Path, params: &TaskUpdateParams) -> Result<TaskDet
     for index in &params.uncheck_ac {
         args.extend(["--uncheck-ac".to_owned(), index.to_string()]);
     }
+    push_all(&mut args, "--add-ref", &params.add_references);
     if let Some(comment) = &params.comment {
         args.extend([
             "--comment".to_owned(),
@@ -319,6 +320,7 @@ struct TaskFile {
     id: String,
     fingerprint: String,
     dependencies: Vec<String>,
+    description_preview: Option<String>,
 }
 
 /// Every task file in `dir` by upper-case ID.
@@ -335,13 +337,15 @@ fn scan(dir: &Path) -> HashMap<String, TaskFile> {
             let digest = Sha256::digest(&bytes);
             let mut fingerprint = crate::checksum::to_lower_hex(&digest);
             fingerprint.truncate(FINGERPRINT_LEN);
-            let (id, dependencies) = frontmatter(&String::from_utf8_lossy(&bytes))?;
+            let text = String::from_utf8_lossy(&bytes);
+            let (id, dependencies) = frontmatter(&text)?;
             Some((
                 id.to_ascii_uppercase(),
                 TaskFile {
                     id,
                     fingerprint,
                     dependencies,
+                    description_preview: description_preview(&text),
                 },
             ))
         })
@@ -383,6 +387,29 @@ fn frontmatter(text: &str) -> Option<(String, Vec<String>)> {
         }
     }
     id.filter(|id| !id.is_empty()).map(|id| (id, dependencies))
+}
+
+/// Most characters of a description kept for a card.
+const PREVIEW_CHARS: usize = 160;
+
+/// The first lines of a task file's description, joined, for a card.
+fn description_preview(text: &str) -> Option<String> {
+    let start = text.find("<!-- SECTION:DESCRIPTION:BEGIN -->")?;
+    let body = &text[start..];
+    let body = body[body.find('\n')? + 1..]
+        .split("<!-- SECTION:DESCRIPTION:END -->")
+        .next()?;
+    let mut preview = String::new();
+    for line in body.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if !preview.is_empty() {
+            preview.push(' ');
+        }
+        preview.push_str(line);
+        if preview.chars().count() >= PREVIEW_CHARS {
+            break;
+        }
+    }
+    (!preview.is_empty()).then(|| preview.chars().take(PREVIEW_CHARS).collect())
 }
 
 /// The value of a top-level `key: value` line.
@@ -518,6 +545,9 @@ struct TaskJson {
     labels: Vec<String>,
     acceptance_criteria_completed: u32,
     acceptance_criteria_count: u32,
+    parent_task_id: Option<String>,
+    milestone: Option<String>,
+    references: Vec<String>,
     // `task view` only.
     path: Option<String>,
     description: Option<String>,
@@ -547,8 +577,14 @@ struct CommentJson {
 
 impl TaskJson {
     fn into_summary(self, file: Option<TaskFile>) -> TaskSummary {
-        let (fingerprint, file_dependencies) = file
-            .map(|file| (file.fingerprint, file.dependencies))
+        let (fingerprint, file_dependencies, description_preview) = file
+            .map(|file| {
+                (
+                    file.fingerprint,
+                    file.dependencies,
+                    file.description_preview,
+                )
+            })
             .unwrap_or_default();
         TaskSummary {
             id: self.id,
@@ -559,6 +595,10 @@ impl TaskJson {
             assignees: self.assignees,
             labels: self.labels,
             dependencies: self.dependencies.unwrap_or(file_dependencies),
+            parent_id: self.parent_task_id,
+            milestone: self.milestone,
+            references: self.references,
+            description_preview,
             acceptance_criteria_checked: self.acceptance_criteria_completed,
             acceptance_criteria_total: self.acceptance_criteria_count,
             fingerprint,
@@ -621,6 +661,16 @@ mod tests {
             Some(("X-1".into(), vec![]))
         );
         assert_eq!(frontmatter("no frontmatter"), None);
+    }
+
+    #[test]
+    fn description_preview_joins_the_first_lines() {
+        let file = "---\nid: T-1\n---\n\n## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nFirst line.\n\nSecond line.\n<!-- SECTION:DESCRIPTION:END -->\n";
+        assert_eq!(
+            description_preview(file).as_deref(),
+            Some("First line. Second line.")
+        );
+        assert_eq!(description_preview("---\nid: T-1\n---\n"), None);
     }
 
     #[test]
@@ -703,8 +753,34 @@ mod tests {
             )
             .unwrap();
 
-            // The list carries dependencies read from the task files.
+            let child = create(
+                &dir,
+                &TaskCreateParams {
+                    description: Some("Child work".into()),
+                    ..create_params("Child")
+                },
+            )
+            .unwrap();
+            // Subtasks come from Backlog.md's own --parent; created here through the CLI.
+            backlog(
+                &dir,
+                &["task", "create", "Sub", "-p", first.summary.id.as_str()],
+            )
+            .unwrap();
+
+            // The list carries dependencies, parents and previews read from the task files.
             let board = list(&dir).unwrap();
+            let sub = board.tasks.iter().find(|task| task.title == "Sub").unwrap();
+            assert_eq!(sub.parent_id.as_deref(), Some(first.summary.id.as_str()));
+            let child_listed = board
+                .tasks
+                .iter()
+                .find(|task| task.id == child.summary.id)
+                .unwrap();
+            assert_eq!(
+                child_listed.description_preview.as_deref(),
+                Some("Child work")
+            );
             assert_eq!(
                 stamp(&dir).unwrap(),
                 board.stamp,
@@ -728,6 +804,7 @@ mod tests {
                     check_ac: vec![1],
                     comment: Some("done here".into()),
                     comment_author: Some("@herdr".into()),
+                    add_references: vec!["https://github.com/o/r/pull/7".into()],
                     ..TaskUpdateParams::default()
                 },
             )
@@ -735,6 +812,10 @@ mod tests {
             assert_eq!(moved.summary.status, "Review");
             assert_eq!(moved.summary.acceptance_criteria_checked, 1);
             assert_eq!(moved.comments.len(), 1);
+            assert_eq!(
+                moved.summary.references,
+                vec!["https://github.com/o/r/pull/7".to_owned()]
+            );
             assert_ne!(moved.summary.fingerprint, first.summary.fingerprint);
             assert_ne!(
                 stamp(&dir).unwrap(),

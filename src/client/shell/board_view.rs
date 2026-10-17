@@ -148,6 +148,8 @@ pub(super) struct ClientBoardView {
     pub(super) sort: BoardSortKey,
     pub(super) sort_ascending: bool,
     pub(super) collapsed: HashSet<String>,
+    /// Parents whose subtasks the list hides.
+    pub(super) folded_tasks: HashSet<String>,
     pub(super) list_scroll: usize,
     pub(super) details_scroll: usize,
     /// Scroll the selection into view at the next frame.
@@ -180,7 +182,10 @@ pub(super) enum BoardRow<'a> {
         count: usize,
         folded: bool,
     },
+    /// A task with no parent on the board.
     Task(&'a TaskSummary),
+    /// A subtask, listed under its parent whatever its own status.
+    Subtask { task: &'a TaskSummary, last: bool },
     /// The new task being named in this group.
     Draft,
     /// A group with no tasks.
@@ -212,6 +217,7 @@ impl ClientBoardView {
             sort: BoardSortKey::Id,
             sort_ascending: true,
             collapsed: HashSet::new(),
+            folded_tasks: HashSet::new(),
             list_scroll: 0,
             details_scroll: 0,
             reveal_selection: false,
@@ -303,7 +309,25 @@ impl ClientBoardView {
         }
     }
 
+    /// The subtasks of `id`, in ID order.
+    pub(super) fn subtasks(&self, id: &str) -> Vec<&TaskSummary> {
+        let mut children: Vec<&TaskSummary> = self
+            .tasks()
+            .iter()
+            .filter(|task| task.parent_id.as_deref() == Some(id))
+            .collect();
+        children.sort_by(|a, b| id_order(&a.id, &b.id));
+        children
+    }
+
     fn matches(&self, task: &TaskSummary, query: &str, agent: Option<&str>) -> bool {
+        self.matches_fields(task, query, agent)
+            && self
+                .status_choice()
+                .is_none_or(|status| task.status == status)
+    }
+
+    fn matches_fields(&self, task: &TaskSummary, query: &str, agent: Option<&str>) -> bool {
         if !query.is_empty() {
             let haystack = format!("{} {} {}", task.id, task.title, task.labels.join(" "));
             if !haystack.to_lowercase().contains(query) {
@@ -320,27 +344,37 @@ impl ClientBoardView {
             .checked_sub(1)
             .and_then(|index| PRIORITIES.get(index))
             .is_none_or(|priority| task.priority.as_deref() == Some(*priority));
-        agent_ok
-            && priority_ok
-            && self
-                .status_choice()
-                .is_none_or(|status| task.status == status)
+        agent_ok && priority_ok
     }
 
     /// The visible tasks of one status, in the list's sort order.
     pub(super) fn column(&self, status: &str) -> Vec<&TaskSummary> {
         let query = self.search.as_str().trim().to_lowercase();
         let agent = self.agent_choices().get(self.agent_filter).cloned();
+        let ids: HashSet<&str> = self.tasks().iter().map(|task| task.id.as_str()).collect();
+        // Subtasks show inside their parent; one whose parent is gone stands alone.
+        let top_level = |task: &&TaskSummary| {
+            task.parent_id
+                .as_deref()
+                .is_none_or(|parent| !ids.contains(parent))
+        };
         let mut tasks: Vec<&TaskSummary> = self
             .tasks()
             .iter()
-            .filter(|task| task.status == status && self.matches(task, &query, agent.as_deref()))
+            .filter(top_level)
+            .filter(|task| {
+                task.status == status
+                    && (self.matches(task, &query, agent.as_deref())
+                        // A matching subtask keeps its parent on screen; the
+                        // status filter is about the parent's column.
+                        || self.subtasks(&task.id).into_iter().any(|child| {
+                            self.matches_fields(child, &query, agent.as_deref())
+                        }))
+            })
             .collect();
         tasks.sort_by(|a, b| {
             let order = match self.sort {
-                BoardSortKey::Id => id_number(&a.id)
-                    .cmp(&id_number(&b.id))
-                    .then_with(|| a.id.cmp(&b.id)),
+                BoardSortKey::Id => id_order(&a.id, &b.id),
                 BoardSortKey::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
                 BoardSortKey::Priority => {
                     priority_rank(a.priority.as_deref()).cmp(&priority_rank(b.priority.as_deref()))
@@ -388,7 +422,20 @@ impl ClientBoardView {
             } else if tasks.is_empty() {
                 rows.push(BoardRow::Empty);
             }
-            rows.extend(tasks.into_iter().map(BoardRow::Task));
+            for task in tasks {
+                rows.push(BoardRow::Task(task));
+                if self.folded_tasks.contains(&task.id) {
+                    continue;
+                }
+                let children = self.subtasks(&task.id);
+                let count = children.len();
+                rows.extend(children.into_iter().enumerate().map(|(index, child)| {
+                    BoardRow::Subtask {
+                        task: child,
+                        last: index + 1 == count,
+                    }
+                }));
+            }
         }
         rows
     }
@@ -398,7 +445,7 @@ impl ClientBoardView {
         self.list_rows()
             .into_iter()
             .filter_map(|row| match row {
-                BoardRow::Task(task) => Some(task.id.clone()),
+                BoardRow::Task(task) | BoardRow::Subtask { task, .. } => Some(task.id.clone()),
                 _ => None,
             })
             .collect()
@@ -460,11 +507,47 @@ impl ClientBoardView {
     }
 }
 
-fn id_number(id: &str) -> u64 {
-    id.rsplit(['-', '.'])
-        .next()
-        .and_then(|number| number.parse().ok())
-        .unwrap_or(u64::MAX)
+/// IDs in reading order: `TASK-2` before `TASK-10`, `TASK-1.9` before `TASK-1.10`.
+pub(super) fn id_order(a: &str, b: &str) -> std::cmp::Ordering {
+    fn chunks(id: &str) -> Vec<&str> {
+        let mut parts = Vec::new();
+        let mut start = 0;
+        let bytes = id.as_bytes();
+        for index in 1..=bytes.len() {
+            if index == bytes.len()
+                || bytes[index].is_ascii_digit() != bytes[index - 1].is_ascii_digit()
+            {
+                parts.push(&id[start..index]);
+                start = index;
+            }
+        }
+        parts
+    }
+    let (left, right) = (chunks(a), chunks(b));
+    for (x, y) in left.iter().zip(&right) {
+        let order = match (x.parse::<u64>(), y.parse::<u64>()) {
+            (Ok(x), Ok(y)) => x.cmp(&y),
+            _ => x.to_ascii_lowercase().cmp(&y.to_ascii_lowercase()),
+        };
+        if order.is_ne() {
+            return order;
+        }
+    }
+    left.len().cmp(&right.len())
+}
+
+/// The task's pull request among its references, with a short label.
+pub(super) fn pull_request(task: &TaskSummary) -> Option<(&str, String)> {
+    task.references.iter().find_map(|reference| {
+        let number = ["/pull/", "/merge_requests/", "/pull-requests/"]
+            .iter()
+            .find_map(|marker| reference.split_once(marker))?
+            .1
+            .split(|ch: char| !ch.is_ascii_digit())
+            .next()
+            .filter(|number| !number.is_empty())?;
+        Some((reference.as_str(), format!("PR #{number}")))
+    })
 }
 
 /// Who a comment from the Board is by: the person at this computer.
@@ -1369,6 +1452,22 @@ impl ClientShellState {
             BoardTarget::NewTask(status) => self.start_board_draft(status, outcome),
             BoardTarget::Nothing | BoardTarget::Draft | BoardTarget::Editing => {}
             BoardTarget::Field(field) => self.start_board_edit(field, outcome),
+            BoardTarget::OpenUrl(url) => {
+                outcome.actions.push(ClientShellAction::OpenSafeWebUrl(url));
+            }
+            BoardTarget::NextStatus(id) => {
+                let next = self.board_view.as_ref().and_then(|view| {
+                    let task = view.task(&id)?;
+                    let statuses = view.statuses();
+                    let index = statuses.iter().position(|status| *status == task.status);
+                    statuses
+                        .get(index.map_or(0, |index| (index + 1) % statuses.len()))
+                        .cloned()
+                });
+                if let Some(status) = next {
+                    self.move_board_task(&id, &status, outcome);
+                }
+            }
             BoardTarget::CycleStatus => {
                 let next = self.board_view.as_ref().and_then(|view| {
                     let task = view.selected_task()?;
@@ -1467,6 +1566,11 @@ impl ClientShellState {
                     BoardTarget::Group(status) => {
                         if !view.collapsed.remove(&status) {
                             view.collapsed.insert(status);
+                        }
+                    }
+                    BoardTarget::FoldTask(id) => {
+                        if !view.folded_tasks.remove(&id) {
+                            view.folded_tasks.insert(id);
                         }
                     }
                     BoardTarget::CloseDetails => view.details_open = false,
@@ -1701,6 +1805,12 @@ pub(super) enum BoardTarget {
     CyclePriority,
     /// An acceptance criterion, by its 1-based index: a click ticks or unticks it.
     ToggleAc(u32),
+    /// A parent's ▾/▸ in the list: shows or hides its subtasks.
+    FoldTask(String),
+    /// A subtask's status pill on a card: a click moves it to the next status.
+    NextStatus(String),
+    /// A link, such as a pull request: a click opens it in the browser.
+    OpenUrl(String),
     CloseDetails,
     /// Takes a click so nothing under it does.
     Nothing,
@@ -1732,6 +1842,10 @@ mod tests {
             assignees: agent.into_iter().map(str::to_owned).collect(),
             labels: Vec::new(),
             dependencies: Vec::new(),
+            parent_id: None,
+            milestone: None,
+            references: Vec::new(),
+            description_preview: None,
             acceptance_criteria_checked: 0,
             acceptance_criteria_total: 0,
             fingerprint: id.into(),
@@ -1758,6 +1872,7 @@ mod tests {
             .map(|row| match row {
                 BoardRow::Group { status, count, .. } => format!("[{status} {count}]"),
                 BoardRow::Task(task) => task.id.clone(),
+                BoardRow::Subtask { task, .. } => format!("  {}", task.id),
                 BoardRow::Draft => "draft".into(),
                 BoardRow::Empty => "empty".into(),
                 BoardRow::Gap => "-".into(),
@@ -1799,6 +1914,22 @@ mod tests {
             ]
         );
         assert_eq!(view.open_count(), 2);
+    }
+
+    #[test]
+    fn ids_sort_in_reading_order_and_pull_requests_are_found() {
+        let mut ids = vec!["T-10", "T-1.10", "T-2", "T-1.9", "T-1"];
+        ids.sort_by(|a, b| id_order(a, b));
+        assert_eq!(ids, ["T-1", "T-1.9", "T-1.10", "T-2", "T-10"]);
+        let mut task = task("T-1", "To Do", None, None);
+        task.references = vec![
+            "docs/x.md".into(),
+            "https://gitlab.com/g/p/-/merge_requests/9".into(),
+        ];
+        assert_eq!(
+            pull_request(&task).map(|(_, label)| label),
+            Some("PR #9".to_owned())
+        );
     }
 
     #[test]

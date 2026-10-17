@@ -153,6 +153,9 @@ cli_params! {
         /// A comment to append.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub comment: Option<String> => Field::new(None).input(optional_text("comment", "TEXT").order(13)),
+        /// References (URLs or files) to add, such as the task's pull request.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub add_references: Vec<String> => Field::new(Vec::new()).input(texts("add-ref", "URL").order(15)),
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub comment_author: Option<String> => Field::new(None).input(optional_text("comment-author", "NAME").order(14)),
     }
@@ -187,6 +190,17 @@ pub struct TaskSummary {
     /// IDs of tasks this one depends on.
     #[serde(default)]
     pub dependencies: Vec<String>,
+    /// The task this one is a subtask of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone: Option<String>,
+    /// URLs or files linked to the task, such as its pull request.
+    #[serde(default)]
+    pub references: Vec<String>,
+    /// The start of the description, for a card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_preview: Option<String>,
     #[serde(default)]
     pub acceptance_criteria_checked: u32,
     #[serde(default)]
