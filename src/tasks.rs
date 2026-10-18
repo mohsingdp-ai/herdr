@@ -281,6 +281,7 @@ pub(crate) fn init(folder: &Path) -> Result<TaskBoardInfo> {
     if Project::find(folder).is_ok() {
         return Err(TaskError::AlreadyInitialized);
     }
+    let folder = &in_main_checkout(folder);
     let name = folder.file_name().map_or_else(
         || "tasks".to_owned(),
         |name| name.to_string_lossy().into_owned(),
@@ -316,9 +317,10 @@ struct Project {
 impl Project {
     /// The nearest Backlog.md project at or above `folder`, as `backlog`
     /// itself finds it: a root `backlog.config.yml`, or a `backlog/` or
-    /// `.backlog/` folder with its own `config.yml`.
+    /// `.backlog/` folder with its own `config.yml`. A linked git worktree
+    /// uses its main checkout's project, so a repository has one board.
     fn find(folder: &Path) -> Result<Self> {
-        for dir in folder.ancestors() {
+        for dir in in_main_checkout(folder).ancestors() {
             let root_config = dir.join("backlog.config.yml");
             if root_config.is_file() {
                 let text = std::fs::read_to_string(&root_config).unwrap_or_default();
@@ -401,6 +403,26 @@ impl Project {
         )?)?;
         Ok(view.task.into_detail(file))
     }
+}
+
+/// The same place in the main checkout when `folder` is inside a linked git
+/// worktree, otherwise `folder` itself. Reads only git's small pointer files
+/// (`.git` and `commondir`), never runs git, so a Board's stamp stays cheap.
+fn in_main_checkout(folder: &Path) -> PathBuf {
+    let main = || {
+        let worktree = folder.ancestors().find(|dir| dir.join(".git").exists())?;
+        // A main checkout's `.git` is a folder, so this read fails for it.
+        let pointer = std::fs::read_to_string(worktree.join(".git")).ok()?;
+        let git_dir = worktree.join(pointer.trim().strip_prefix("gitdir:")?.trim());
+        // Only linked worktrees have `commondir`; submodules do not.
+        let common = std::fs::read_to_string(git_dir.join("commondir")).ok()?;
+        let common = git_dir.join(common.trim()).canonicalize().ok()?;
+        if common.file_name()? != ".git" {
+            return None;
+        }
+        Some(common.parent()?.join(folder.strip_prefix(worktree).ok()?))
+    };
+    main().unwrap_or_else(|| folder.to_path_buf())
 }
 
 /// Runs `work` holding the write lock of the project at `root`: one `backlog`
@@ -848,6 +870,30 @@ impl TaskJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linked_worktrees_use_the_main_checkout() {
+        let base = std::env::temp_dir().join(format!("herdr-tasks-wt-{}", std::process::id()));
+        let main = base.join("main");
+        let link = main.join(".git/worktrees/wt");
+        let worktree = base.join("wt");
+        std::fs::create_dir_all(&link).unwrap();
+        std::fs::create_dir_all(worktree.join("src")).unwrap();
+        std::fs::write(link.join("commondir"), "../..\n").unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", link.display()),
+        )
+        .unwrap();
+        let main = main.canonicalize().unwrap();
+        assert_eq!(in_main_checkout(&worktree), main);
+        assert_eq!(in_main_checkout(&worktree.join("src")), main.join("src"));
+        assert_eq!(in_main_checkout(&main), main);
+        // A submodule's gitdir has no `commondir`: it stays where it is.
+        std::fs::remove_file(link.join("commondir")).unwrap();
+        assert_eq!(in_main_checkout(&worktree), worktree);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn frontmatter_reads_id_and_both_dependency_styles() {
