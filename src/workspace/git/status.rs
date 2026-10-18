@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::workspace::{GitSpaceMetadata, WorkspaceGitStatusSnapshot};
 
@@ -42,6 +42,8 @@ pub struct GitStatusCacheEntry {
 pub struct GitStatusFingerprint {
     pub head: GitHeadIdentity,
     pub upstream: Option<GitUpstreamIdentity>,
+    /// A no-upstream branch's remote copies, so a push recounts.
+    remote_copies: Vec<(std::ffi::OsString, Option<SystemTime>)>,
     repository_context: RepoContext,
 }
 
@@ -227,12 +229,40 @@ fn fingerprint(mut repo: RepoContext, include_upstream: bool) -> Option<GitStatu
         }
         _ => None,
     };
+    let remote_copies = match (&head, &upstream) {
+        (GitHeadIdentity::Branch { short_name, .. }, None) if include_upstream => {
+            remote_copy_stamps(&repo.0, short_name)
+        }
+        _ => Vec::new(),
+    };
 
     Some(GitStatusFingerprint {
         head,
         upstream,
+        remote_copies,
         repository_context: repo,
     })
+}
+
+// ponytail: loose refs only; reftable or renamed pushes recount on next commit.
+fn remote_copy_stamps(
+    info: &GitWorktreeInfo,
+    branch: &str,
+) -> Vec<(std::ffi::OsString, Option<SystemTime>)> {
+    let Ok(remotes) = std::fs::read_dir(info.git_common_dir.join("refs/remotes")) else {
+        return Vec::new();
+    };
+    let mut stamps: Vec<_> = remotes
+        .flatten()
+        .map(|remote| {
+            let changed = std::fs::metadata(remote.path().join(branch))
+                .and_then(|metadata| metadata.modified())
+                .ok();
+            (remote.file_name(), changed)
+        })
+        .collect();
+    stamps.sort();
+    stamps
 }
 
 impl GitStatusFingerprint {
@@ -343,8 +373,7 @@ fn git_ahead_behind_between(
 
 /// Commits on HEAD that no remote-tracking branch has, for a branch with no
 /// upstream. `None` in a repository without remotes, where nothing is pushed.
-// ponytail: cached with the HEAD fingerprint, so a push that sets no upstream
-// shows until HEAD moves; capped so a huge local history stays cheap.
+// ponytail: capped so a huge local history stays cheap.
 pub(crate) fn git_unpushed_count(cwd: &Path) -> Option<usize> {
     let git = |args: &[&str]| {
         let output = crate::noninteractive_process::command("git")
@@ -616,9 +645,12 @@ mod tests {
         run_git(&repo, &["checkout", "--quiet", "-b", "feature"]);
         run_git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "one"]);
         run_git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "two"]);
-        let (snapshot, _) = git_status_snapshot_for_cwd(&repo, None);
+        let (snapshot, cached) = git_status_snapshot_for_cwd(&repo, None);
         assert_eq!(snapshot.branch.as_deref(), Some("feature"));
         assert_eq!(snapshot.ahead_behind, Some((2, 0)));
+        run_git(&repo, &["push", "--quiet", "origin", "feature"]);
+        let (snapshot, _) = git_status_snapshot_for_cwd(&repo, cached.as_ref());
+        assert_eq!(snapshot.ahead_behind, Some((0, 0)));
 
         assert_eq!(git_operation(&repo), None);
         std::fs::create_dir(repo.join(".git/rebase-merge")).unwrap();
