@@ -143,6 +143,7 @@ operations::define_operations! {
     NoteWrite(NoteWriteParams) => "note.write", false, true;
     NoteRename(NoteRenameParams) => "note.rename", false, true;
     NoteDelete(NoteDeleteParams) => "note.delete", false, true;
+    NoteAttach(NoteAttachParams) => "note.attach", false, true;
     PaneSelectionRead(PaneSelectionReadParams) => "pane.selection.read", false, true;
     PaneCopyMotion(PaneCopyMotionParams) => "pane.copy_motion", false, true;
     PaneCopySearch(PaneCopySearchParams) => "pane.copy_search", false, true;

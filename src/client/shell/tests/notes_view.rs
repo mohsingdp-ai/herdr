@@ -387,3 +387,74 @@ fn a_rename_waits_for_the_save_on_its_way() {
         Method::NoteRename(params) if params.from == "scratch.md" && params.to == "inbox.md"
     )));
 }
+
+#[test]
+fn a_pasted_image_is_saved_and_embedded_at_the_cursor() {
+    let mut state = opened(sample());
+    screen(&mut state, 160, 40);
+    key(&mut state, KeyCode::Enter, KeyModifiers::empty());
+    assert!(state.notes_editor_focused());
+    let mut outcome = ClientShellInput::default();
+    let png = b"\x89PNG\r\n\x1a\nimage".to_vec();
+    state.paste_into_note(
+        None,
+        || {
+            Some(crate::platform::ClipboardImage {
+                bytes: png.clone(),
+                extension: "png",
+            })
+        },
+        &mut outcome,
+    );
+    let sent = requests(outcome.actions);
+    let params = match &sent[0].method {
+        Method::NoteAttach(params) => params,
+        other => panic!("expected an attach, got {other:?}"),
+    };
+    assert_eq!(params.extension, "png");
+    use base64::Engine as _;
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(&params.data)
+            .expect("base64"),
+        png
+    );
+    answer(
+        &mut state,
+        &sent[0],
+        Ok(ResponseResult::NoteAttached {
+            path: "attachments/Pasted image 20261019120000.png".into(),
+        }),
+    );
+    let text = state
+        .notes_view
+        .as_ref()
+        .and_then(|view| view.open_text())
+        .expect("note text");
+    assert!(
+        text.ends_with("@src/ui.rs ![[attachments/Pasted image 20261019120000.png]]"),
+        "{text}"
+    );
+    // Back in read mode it shows as the image's name.
+    key(&mut state, KeyCode::Esc, KeyModifiers::empty());
+    assert!(screen(&mut state, 160, 40).contains("▣ Pasted image 20261019120000.png"));
+}
+
+#[test]
+fn clipboard_text_wins_over_an_image() {
+    let mut state = opened(sample());
+    screen(&mut state, 160, 40);
+    key(&mut state, KeyCode::Enter, KeyModifiers::empty());
+    let mut outcome = ClientShellInput::default();
+    state.paste_into_note(
+        Some("words".into()),
+        || panic!("the image is not read when there is text"),
+        &mut outcome,
+    );
+    assert!(requests(outcome.actions).is_empty());
+    assert!(state
+        .notes_view
+        .as_ref()
+        .and_then(|view| view.open_text())
+        .is_some_and(|text| text.ends_with("words")));
+}

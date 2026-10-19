@@ -37,6 +37,8 @@ pub(super) enum Inline {
     Code,
     /// A `[[link]]`'s shown text, with the note it points at.
     Link(String),
+    /// An `![[embed]]`'s file name, with the file it points at: an image, or a note.
+    Embed(String),
     Tag(String),
     FileRef,
     Url(String),
@@ -169,6 +171,16 @@ fn tag_char(ch: char) -> bool {
     ch.is_alphanumeric() || matches!(ch, '_' | '-' | '/')
 }
 
+/// `rest` up to the next space, or up to a `[[link]]` glued onto it.
+fn word(rest: &str) -> &str {
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let word = &rest[..end];
+    match word.find("[[") {
+        Some(at) => word[..at].strip_suffix('!').unwrap_or(&word[..at]),
+        None => word,
+    }
+}
+
 /// Splits `content` (which starts at byte `base` of its line) into spans.
 fn inline_spans(content: &str, base: usize) -> Vec<Span> {
     let mut spans = Vec::new();
@@ -189,7 +201,21 @@ fn inline_spans(content: &str, base: usize) -> Vec<Span> {
             .next_back()
             .is_none_or(|prev| prev.is_whitespace() || prev == '(');
         let token: Option<Vec<(Range<usize>, Inline)>> =
-            if let Some(after) = rest.strip_prefix("[[") {
+            if let Some(after) = rest.strip_prefix("![[") {
+                after.find("]]").filter(|&end| end > 0).map(|end| {
+                    let inner = &after[..end];
+                    let target_len = inner.find(['|', '#']).unwrap_or(inner.len());
+                    let target = inner[..target_len].trim().to_owned();
+                    let start = i + 3;
+                    // The folder is syntax too: read mode shows the file's name.
+                    let name_at = inner[..target_len].rfind('/').map_or(0, |at| at + 1);
+                    vec![
+                        (i..start + name_at, Inline::Mark),
+                        (start + name_at..start + target_len, Inline::Embed(target)),
+                        (start + target_len..start + end + 2, Inline::Mark),
+                    ]
+                })
+            } else if let Some(after) = rest.strip_prefix("[[") {
                 after.find("]]").filter(|&end| end > 0).map(|end| {
                     let inner = &after[..end];
                     let target = inner
@@ -238,12 +264,10 @@ fn inline_spans(content: &str, base: usize) -> Vec<Span> {
                 (!name.is_empty() && !name.chars().all(|ch| ch.is_ascii_digit()))
                     .then(|| vec![(i..i + 1 + name.len(), Inline::Tag(name))])
             } else if word_start && (rest.starts_with("https://") || rest.starts_with("http://")) {
-                let len = rest.find(char::is_whitespace).unwrap_or(rest.len());
-                let url = rest[..len].trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
+                let url = word(rest).trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
                 Some(vec![(i..i + url.len(), Inline::Url(url.to_owned()))])
             } else if word_start && rest.starts_with('@') {
-                let len = rest.find(char::is_whitespace).unwrap_or(rest.len());
-                let path = rest[..len].trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
+                let path = word(rest).trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
                 (path.len() > 1).then(|| vec![(i..i + path.len(), Inline::FileRef)])
             } else {
                 None
@@ -272,9 +296,18 @@ pub(super) fn links(text: &str) -> Vec<String> {
         .flat_map(|line| line.spans)
         .filter_map(|span| match span.kind {
             Inline::Link(target) => Some(target),
+            Inline::Embed(target) if !is_image(&target) => Some(target),
             _ => None,
         })
         .collect()
+}
+
+/// Whether an `![[embed]]` names an image rather than a note.
+pub(super) fn is_image(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]
+        .iter()
+        .any(|extension| name.ends_with(extension))
 }
 
 /// The `#tags` in a note, skipping code.
@@ -316,6 +349,8 @@ pub(super) enum Look {
     Link {
         exists: bool,
     },
+    /// An embedded image, shown by its name.
+    Image,
     Tag,
     FileRef,
     Url,
@@ -338,6 +373,8 @@ pub(super) enum Look {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum DocTarget {
     Link(String),
+    /// An embedded image, by its path in the vault.
+    Image(String),
     Tag(String),
     Url(String),
     /// A task's box, by line index.
@@ -485,10 +522,27 @@ pub(super) fn layout(text: &str, width: u16, exists: &dyn Fn(&str) -> bool) -> V
                 Inline::Tag(name) => (Look::Tag, Some(DocTarget::Tag(name.clone()))),
                 Inline::FileRef => (Look::FileRef, None),
                 Inline::Url(url) => (Look::Url, Some(DocTarget::Url(url.clone()))),
+                Inline::Embed(name) if is_image(name) => {
+                    (Look::Image, Some(DocTarget::Image(name.clone())))
+                }
+                Inline::Embed(name) => (
+                    Look::Link {
+                        exists: exists(name),
+                    },
+                    Some(DocTarget::Link(name.clone())),
+                ),
             };
             let Some(source) = line.get(span.range.clone()) else {
                 continue;
             };
+            if look == Look::Image {
+                atoms.push(Atom {
+                    text: "▣ ",
+                    look,
+                    src: None,
+                    target: target.clone(),
+                });
+            }
             for (offset, grapheme) in source.grapheme_indices(true) {
                 atoms.push(Atom {
                     text: grapheme,
@@ -609,6 +663,8 @@ pub(super) fn tint(line: &str, parsed: &ParsedLine) -> Vec<(Range<usize>, Look)>
             Inline::Code if matches!(parsed.block, Block::Code | Block::Fence) => Look::CodeBlock,
             Inline::Code => Look::Code,
             Inline::Link(_) => Look::Link { exists: true },
+            Inline::Embed(name) if is_image(name) => Look::Image,
+            Inline::Embed(_) => Look::Link { exists: true },
             Inline::Tag(_) => Look::Tag,
             Inline::FileRef => Look::FileRef,
             Inline::Url(_) => Look::Url,
@@ -763,6 +819,39 @@ mod tests {
             .sum::<usize>()
             <= 4));
         assert_eq!(shown(&layout("", 10, &|_| true)), vec![""]);
+    }
+
+    #[test]
+    fn embedded_images_show_by_name_and_are_not_links() {
+        let text = "see ![[attachments/Pasted image 1.png|300]] and ![[Other]]";
+        assert_eq!(
+            kinds(text),
+            vec![
+                ("see ", Inline::Plain),
+                ("![[attachments/", Inline::Mark),
+                (
+                    "Pasted image 1.png",
+                    Inline::Embed("attachments/Pasted image 1.png".into())
+                ),
+                ("|300]]", Inline::Mark),
+                (" and ", Inline::Plain),
+                ("![[", Inline::Mark),
+                ("Other", Inline::Embed("Other".into())),
+                ("]]", Inline::Mark),
+            ]
+        );
+        assert_eq!(links(text), vec!["Other".to_owned()]);
+        // A path or web link stops where an embed is glued onto it.
+        assert_eq!(
+            kinds("@src/ui.rs![[a.png]]")[0],
+            ("@src/ui.rs", Inline::FileRef)
+        );
+        let rows = layout(text, 80, &|_| true);
+        assert_eq!(shown(&rows), vec!["see ▣ Pasted image 1.png and Other"]);
+        assert_eq!(
+            rows[0].target_at(5),
+            Some(&DocTarget::Image("attachments/Pasted image 1.png".into()))
+        );
     }
 
     #[test]

@@ -370,6 +370,10 @@ mod tests {
             actual.remove("note.delete").as_deref(),
             Some("409e1c9e71141e080d37bba1c3d57a91c72a0d15bfb76bba2f1c5350ded03cae")
         );
+        assert_eq!(
+            actual.remove("note.attach").as_deref(),
+            Some("ca080cf568a6295b1af35c6bae2f43be223ad7132cbee9fdfaac6ac1d2c6c3c7")
+        );
 
         assert_eq!(
             actual, expected,

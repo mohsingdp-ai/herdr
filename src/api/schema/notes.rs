@@ -55,6 +55,22 @@ pub struct NoteDeleteParams {
     pub path: String,
 }
 
+/// Saves a pasted image into the vault's `attachments` folder under a new
+/// name, for a note to embed as `![[attachments/…]]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+pub struct NoteAttachParams {
+    /// The workspace whose notes to use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// A pane whose workspace's notes to use, when no workspace is given. Defaults to the focused pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    /// The image type: `png`, `jpg`, `jpeg`, `gif`, `webp` or `bmp`.
+    pub extension: String,
+    /// The image bytes, base64.
+    pub data: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NoteFile {
     /// Relative to the vault root, with `/` separators.

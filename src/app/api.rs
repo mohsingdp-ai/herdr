@@ -1148,7 +1148,8 @@ impl App {
             | Method::NoteStamp(_)
             | Method::NoteWrite(_)
             | Method::NoteRename(_)
-            | Method::NoteDelete(_) => {
+            | Method::NoteDelete(_)
+            | Method::NoteAttach(_) => {
                 return responses::encode_error(
                     request.id,
                     "invalid_request",

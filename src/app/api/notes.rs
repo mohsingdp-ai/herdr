@@ -15,6 +15,7 @@ pub(crate) fn is_note_method(method: &Method) -> bool {
             | Method::NoteWrite(_)
             | Method::NoteRename(_)
             | Method::NoteDelete(_)
+            | Method::NoteAttach(_)
     )
 }
 
@@ -71,6 +72,18 @@ impl App {
                     params.workspace_id.clone(),
                     params.pane_id.clone(),
                     Box::new(move |notes| notes.delete(&params.path).map(vault)),
+                ),
+                Method::NoteAttach(params) => (
+                    params.workspace_id.clone(),
+                    params.pane_id.clone(),
+                    Box::new(move |notes| {
+                        use base64::Engine as _;
+                        let bytes = base64::engine::general_purpose::STANDARD
+                            .decode(params.data.as_bytes())
+                            .map_err(|_| NoteError::BadImage)?;
+                        let path = notes.attach(&params.extension, &bytes)?;
+                        Ok(ResponseResult::NoteAttached { path })
+                    }),
                 ),
                 _ => {
                     let _ =

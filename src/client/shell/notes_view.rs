@@ -50,6 +50,10 @@ pub(super) enum NotesRequest {
     Delete {
         path: String,
     },
+    /// A pasted image on its way to the vault, for the note at `note`.
+    Attach {
+        note: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1044,6 +1048,71 @@ impl ClientShellState {
         self.send_notes_request(method, generation, NotesRequest::Delete { path }, outcome);
     }
 
+    /// Opens a file of the vault, such as a pasted image, in the desktop's
+    /// viewer. Only a local server's files are on this machine.
+    fn open_note_file(&mut self, path: &str, outcome: &mut ClientShellInput) {
+        let local = self.active_endpoint_id == ClientEndpointId::Local;
+        let Some(view) = self.notes_view.as_mut() else {
+            return;
+        };
+        let file = view.file_path(path);
+        match file {
+            Some(file) if local => outcome.actions.push(ClientShellAction::OpenPath(file)),
+            Some(file) => view.message = Some(format!("{file} is on the server")),
+            None => {}
+        }
+        outcome.repaint = true;
+    }
+
+    /// Whether a paste goes into the note being edited.
+    pub(super) fn notes_editor_focused(&self) -> bool {
+        self.overlay.is_none()
+            && self
+                .notes_view
+                .as_ref()
+                .is_some_and(|view| view.switcher.is_none() && view.editor.is_some())
+    }
+
+    /// Pastes into the note being edited: the clipboard's text when it has
+    /// some, else its image, saved into the vault and embedded at the cursor.
+    pub(super) fn paste_into_note(
+        &mut self,
+        text: Option<String>,
+        read_image: impl FnOnce() -> Option<crate::platform::ClipboardImage>,
+        outcome: &mut ClientShellInput,
+    ) {
+        if let Some(text) = text.filter(|text| !text.is_empty()) {
+            outcome.repaint |= self.insert_notes_view_text(&text);
+            return;
+        }
+        let Some(image) = read_image() else {
+            return;
+        };
+        let Some(view) = self.notes_view.as_mut() else {
+            return;
+        };
+        let Some(note) = view.open.clone() else {
+            return;
+        };
+        outcome.repaint = true;
+        if image.bytes.len() > crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD {
+            view.message = Some("the image is too large to paste (16 MiB at most)".to_owned());
+            return;
+        }
+        view.message = Some("pasting image…".to_owned());
+        let generation = view.generation;
+        let method = Method::NoteAttach(crate::api::schema::NoteAttachParams {
+            workspace_id: Some(view.workspace_id.clone()),
+            pane_id: None,
+            extension: image.extension.to_owned(),
+            data: {
+                use base64::Engine as _;
+                base64::engine::general_purpose::STANDARD.encode(&image.bytes)
+            },
+        });
+        self.send_notes_request(method, generation, NotesRequest::Attach { note }, outcome);
+    }
+
     /// Types the open note's file path into the space's focused pane, usually
     /// an agent's prompt, and goes there.
     pub(super) fn send_note_to_agent(&mut self, outcome: &mut ClientShellInput) {
@@ -1508,6 +1577,7 @@ impl ClientShellState {
                 outcome.actions.push(ClientShellAction::OpenSafeWebUrl(url));
             }
             Some(DocTarget::Checkbox(line)) => self.toggle_checkbox(line, outcome),
+            Some(DocTarget::Image(path)) => self.open_note_file(&path, outcome),
             None => {
                 let at = doc_row
                     .source_offset(x)
@@ -1731,6 +1801,31 @@ impl ClientShellState {
                 }
                 Ok(_) => view.message = Some("unexpected answer from the server".into()),
                 Err(error) => view.message = Some(format!("not renamed: {}", error.message)),
+            },
+            NotesRequest::Attach { note } => match result {
+                Ok(ResponseResult::NoteAttached { path }) => {
+                    view.message = None;
+                    match view.editor.as_mut() {
+                        // The note still being edited gets the image where the cursor is,
+                        // a space apart from a word right before it.
+                        Some(editor) if view.open.as_deref() == Some(note.as_str()) => {
+                            let (line, byte) = editor.cursor();
+                            let glued = editor.lines().get(line).is_some_and(|text| {
+                                text[..byte.min(text.len())]
+                                    .chars()
+                                    .next_back()
+                                    .is_some_and(|ch| !ch.is_whitespace())
+                            });
+                            let space = if glued { " " } else { "" };
+                            editor.insert(&format!("{space}![[{path}]]"));
+                            view.save_due = Some(Instant::now() + AUTOSAVE_DELAY);
+                            view.reveal_cursor = true;
+                        }
+                        _ => view.message = Some(format!("image saved as {path}")),
+                    }
+                }
+                Ok(_) => view.message = Some("unexpected answer from the server".into()),
+                Err(error) => view.message = Some(format!("image not pasted: {}", error.message)),
             },
             NotesRequest::Delete { path } => match result {
                 Ok(ResponseResult::NoteList { vault }) => {

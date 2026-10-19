@@ -265,6 +265,8 @@ pub(crate) enum ClientShellAction {
     },
     ClipboardWrite(Vec<u8>),
     OpenSafeWebUrl(String),
+    /// Open a local folder in the desktop's file manager.
+    OpenPath(String),
     ActivateEndpoint {
         endpoint_id: ClientEndpointId,
         target: Option<ClientEndpointFocusTarget>,

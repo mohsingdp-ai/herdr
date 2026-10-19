@@ -118,6 +118,10 @@ pub enum ResponseResult {
         /// The vault's `note.stamp` after the write.
         stamp: String,
     },
+    NoteAttached {
+        /// The saved image, relative to the vault root.
+        path: String,
+    },
     WorktreeList {
         source: WorktreeSourceInfo,
         worktrees: Vec<WorktreeInfo>,

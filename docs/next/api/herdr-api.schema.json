@@ -2681,6 +2681,38 @@
           ],
           "type": "object"
         },
+        "NoteAttachParams": {
+          "description": "Saves a pasted image into the vault's `attachments` folder under a new\nname, for a note to embed as `![[attachments/…]]`.",
+          "properties": {
+            "data": {
+              "description": "The image bytes, base64.",
+              "type": "string"
+            },
+            "extension": {
+              "description": "The image type: `png`, `jpg`, `jpeg`, `gif`, `webp` or `bmp`.",
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "A pane whose workspace's notes to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose notes to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "extension",
+            "data"
+          ],
+          "type": "object"
+        },
         "NoteDeleteParams": {
           "description": "Moves one note into the vault's `.trash` folder.",
           "properties": {
@@ -6866,6 +6898,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/NoteDeleteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "note.attach",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/NoteAttachParams"
             }
           },
           "required": [
@@ -11166,6 +11214,23 @@
                 "type",
                 "note",
                 "stamp"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "path": {
+                  "description": "The saved image, relative to the vault root.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "note_attached",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "path"
               ],
               "type": "object"
             },

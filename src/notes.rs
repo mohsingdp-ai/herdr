@@ -17,6 +17,9 @@ const MAX_NOTE_BYTES: u64 = 1 << 20;
 const MAX_COMPONENT_BYTES: usize = 255;
 /// Obsidian's name for a vault's deleted notes; skipped like any dot folder.
 const TRASH: &str = ".trash";
+/// Where pasted images go, as `Pasted image <time>.<ext>` like Obsidian names them.
+const ATTACHMENTS: &str = "attachments";
+const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NoteError {
@@ -26,6 +29,8 @@ pub(crate) enum NoteError {
     /// The note changed since the caller read it; nothing was written.
     Conflict(String),
     TooLarge,
+    /// Not an image this vault takes, or not what its type says.
+    BadImage,
     Failed(String),
 }
 
@@ -37,6 +42,7 @@ impl NoteError {
             Self::Missing(_) => "note_missing",
             Self::Conflict(_) => "note_conflict",
             Self::TooLarge => "note_too_large",
+            Self::BadImage => "note_bad_image",
             Self::Failed(_) => "note_failed",
         }
     }
@@ -53,6 +59,11 @@ impl NoteError {
                 format!("note {path} changed since it was read; reload and try again")
             }
             Self::TooLarge => format!("a note can hold at most {MAX_NOTE_BYTES} bytes"),
+            Self::BadImage => format!(
+                "an attachment must be a {} image of at most {} bytes",
+                IMAGE_EXTENSIONS.join(", "),
+                crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD
+            ),
             Self::Failed(message) => message.clone(),
         }
     }
@@ -185,6 +196,48 @@ impl Vault {
             }
         }
         Ok(())
+    }
+
+    /// Saves a pasted image as `attachments/Pasted image <time>.<ext>` and
+    /// returns that path. The name is the server's own, so nothing a client
+    /// sends becomes a path.
+    pub(crate) fn attach(&self, extension: &str, bytes: &[u8]) -> Result<String> {
+        let extension = extension.to_ascii_lowercase();
+        if !IMAGE_EXTENSIONS.contains(&extension.as_str())
+            || bytes.len() > crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD
+            || !looks_like(&extension, bytes)
+        {
+            return Err(NoteError::BadImage);
+        }
+        let time = crate::platform::local_datetime().map_or_else(
+            || millis(Some(SystemTime::now())).to_string(),
+            |now| {
+                format!(
+                    "{:04}{:02}{:02}{:02}{:02}{:02}",
+                    now.year(),
+                    u8::from(now.month()),
+                    now.day(),
+                    now.hour(),
+                    now.minute(),
+                    now.second()
+                )
+            },
+        );
+        crate::tasks::locked(&self.root, || {
+            let mut name = format!("Pasted image {time}.{extension}");
+            let mut copy = 2;
+            while std::fs::symlink_metadata(self.root.join(ATTACHMENTS).join(&name)).is_ok() {
+                name = format!("Pasted image {time} ({copy}).{extension}");
+                copy += 1;
+            }
+            let file = self.root.join(ATTACHMENTS).join(&name);
+            if let Some(parent) = file.parent() {
+                std::fs::create_dir_all(parent).map_err(failed)?;
+            }
+            crate::detect::manifest_update::atomic_write(&file, bytes)
+                .map_err(NoteError::Failed)?;
+            Ok(format!("{ATTACHMENTS}/{name}"))
+        })
     }
 
     /// Moves the note into `.trash`, keeping its folders, as Obsidian does.
@@ -364,6 +417,18 @@ fn relink_text(text: &str, from: &str, to: &str) -> Option<String> {
     changed.then_some(out)
 }
 
+/// Whether `bytes` start the way an image of type `extension` does.
+fn looks_like(extension: &str, bytes: &[u8]) -> bool {
+    match extension {
+        "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "jpg" | "jpeg" => bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "webp" => bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP",
+        "bmp" => bytes.starts_with(b"BM"),
+        _ => false,
+    }
+}
+
 fn fingerprint(bytes: &[u8]) -> String {
     crate::checksum::to_lower_hex(&Sha256::digest(bytes))
 }
@@ -528,6 +593,30 @@ mod tests {
                 .code(),
             "note_missing"
         );
+        let _ = std::fs::remove_dir_all(vault.root.parent().unwrap());
+    }
+
+    #[test]
+    fn pasted_images_get_their_own_names_and_must_be_images() {
+        let vault = vault("attach");
+        let png = b"\x89PNG\r\n\x1a\nrest";
+        let first = vault.attach("PNG", png).unwrap();
+        let second = vault.attach("png", png).unwrap();
+        assert!(first.starts_with("attachments/Pasted image ") && first.ends_with(".png"));
+        assert_ne!(first, second, "the same second gets a numbered name");
+        assert_eq!(std::fs::read(vault.root.join(&second)).unwrap(), png);
+        // Images never show up as notes.
+        assert!(vault.list().notes.is_empty());
+        for (extension, bytes) in [
+            ("png", &b"not a png"[..]),
+            ("svg", &b"<svg>"[..]),
+            ("exe", &b"MZ"[..]),
+        ] {
+            assert_eq!(
+                vault.attach(extension, bytes).unwrap_err().code(),
+                "note_bad_image"
+            );
+        }
         let _ = std::fs::remove_dir_all(vault.root.parent().unwrap());
     }
 

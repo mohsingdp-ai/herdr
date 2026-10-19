@@ -312,6 +312,13 @@ impl ClientShellState {
                             outcome.repaint |= self.insert_git_view_text(&text);
                         } else if self.overlay.is_none() && self.board_view.is_some() {
                             outcome.repaint |= self.insert_board_view_text(&text);
+                        } else if text.is_empty() && self.notes_editor_focused() {
+                            // A terminal pastes an image as an empty paste.
+                            self.paste_into_note(
+                                None,
+                                crate::platform::read_clipboard_image,
+                                &mut outcome,
+                            );
                         } else if self.overlay.is_none() && self.notes_view.is_some() {
                             outcome.repaint |= self.insert_notes_view_text(&text);
                         } else if self.overlay.is_none() && self.mode == ClientShellMode::Terminal {
@@ -637,6 +644,14 @@ impl ClientShellState {
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) -> Option<ClientInputTarget> {
+        if is_modal_paste_shortcut(key) && self.notes_editor_focused() {
+            self.paste_into_note(
+                crate::platform::read_clipboard_text(),
+                crate::platform::read_clipboard_image,
+                outcome,
+            );
+            return None;
+        }
         if self.handle_modal_paste_shortcut_with(key, outcome, crate::platform::read_clipboard_text)
         {
             return None;

@@ -55,6 +55,11 @@ pub(super) fn dispatch_client_shell_actions(
                     }
                 }
             }
+            shell::ClientShellAction::OpenPath(path) => match crate::platform::open_url(&path) {
+                Ok(Some(child)) => detached_process_children.push(child),
+                Ok(None) => {}
+                Err(err) => warn!(err = %err, path = %path, "failed to open pane folder"),
+            },
             shell::ClientShellAction::ReplayMouse(events) => replay_mouse.extend(events),
             // Needs the loop's event sender; finish_client_shell_input starts it.
             shell::ClientShellAction::PickFolder => {}

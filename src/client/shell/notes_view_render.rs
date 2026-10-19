@@ -204,6 +204,10 @@ impl Styles {
             Look::Link { exists: false } => Style::default()
                 .fg(p.overlay1)
                 .add_modifier(Modifier::UNDERLINED | Modifier::ITALIC),
+            Look::Image => Style::default()
+                .fg(p.mauve)
+                .bg(p.surface0)
+                .add_modifier(Modifier::BOLD),
             Look::Tag => self.tag(),
             Look::FileRef => Style::default().fg(p.teal),
             Look::Url => Style::default()
