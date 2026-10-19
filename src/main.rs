@@ -34,6 +34,7 @@ mod layout;
 mod logging;
 mod metadata_tokens;
 mod noninteractive_process;
+mod notes;
 mod pane;
 use ghostty_vt::pane_graphics_files;
 mod persist;
@@ -188,6 +189,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # toggle_editor = ""      # optional, unset by default; bind e.g. "prefix+o" to flip an agent and its $EDITOR
 # git_view = ""           # optional, unset by default; bind e.g. "prefix+i" to show the space's changes and history
 # board_view = ""         # optional, unset by default; bind e.g. "prefix+b" to show the space's task board
+# notes_view = ""         # optional, unset by default; bind e.g. "prefix+shift+n" to show the space's notes
 # split_vertical = "prefix+v"
 # split_horizontal = "prefix+minus"
 # close_pane = "prefix+x"

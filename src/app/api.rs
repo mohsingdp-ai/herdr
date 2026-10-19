@@ -9,6 +9,7 @@ mod env;
 pub(crate) mod git;
 mod integrations;
 mod layouts;
+pub(crate) mod notes;
 mod panes;
 pub(crate) mod plugins;
 pub(super) mod responses;
@@ -1141,6 +1142,17 @@ impl App {
                     request.id,
                     "invalid_request",
                     "task requests are handled asynchronously by the app runtime",
+                );
+            }
+            Method::NoteList(_)
+            | Method::NoteStamp(_)
+            | Method::NoteWrite(_)
+            | Method::NoteRename(_)
+            | Method::NoteDelete(_) => {
+                return responses::encode_error(
+                    request.id,
+                    "invalid_request",
+                    "note requests are handled asynchronously by the app runtime",
                 );
             }
             Method::WorktreeList(_) | Method::WorktreeOpen(_) => {

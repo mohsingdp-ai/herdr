@@ -800,6 +800,12 @@
           "description": "Show or hide the focused space's task Board: its Backlog.md tasks as a kanban or grouped list. Unset by default."
         },
         {
+          "key": "keys.notes_view",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Show or hide the focused space's notes: plain markdown files per project with [[links]], #tags and backlinks, Obsidian style. Unset by default."
+        },
+        {
           "key": "keys.split_vertical",
           "type": "keybinding",
           "default": "\"prefix+v\"",

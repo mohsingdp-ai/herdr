@@ -41,6 +41,13 @@ pub fn state_dir() -> PathBuf {
     platform_state_dir()
 }
 
+pub fn data_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(dir).join(app_dir_name());
+    }
+    platform_data_dir()
+}
+
 #[cfg(windows)]
 fn platform_config_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("APPDATA") {
@@ -90,6 +97,32 @@ fn platform_state_dir() -> PathBuf {
         PathBuf::from(home).join(format!(".local/state/{}", app_dir_name()))
     } else {
         std::env::temp_dir().join(format!("{}-state", app_dir_name()))
+    }
+}
+
+#[cfg(windows)]
+fn platform_data_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("LOCALAPPDATA") {
+        return PathBuf::from(dir).join(app_dir_name());
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        return PathBuf::from(profile)
+            .join("AppData")
+            .join("Local")
+            .join(app_dir_name());
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(format!(".local/share/{}", app_dir_name()));
+    }
+    std::env::temp_dir().join(format!("{}-data", app_dir_name()))
+}
+
+#[cfg(not(windows))]
+fn platform_data_dir() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(format!(".local/share/{}", app_dir_name()))
+    } else {
+        std::env::temp_dir().join(format!("{}-data", app_dir_name()))
     }
 }
 

@@ -894,7 +894,7 @@ fn render_header(
 }
 
 /// `/home/me/x` → `~/x`.
-fn tilde(path: &str) -> String {
+pub(super) fn tilde(path: &str) -> String {
     std::env::var("HOME")
         .ok()
         .filter(|home| !home.is_empty())
@@ -1545,7 +1545,7 @@ fn render_notice(
     hits.targets.push((button, BoardTarget::Retry));
 }
 
-fn draw_box(buffer: &mut Buffer, rect: Rect, style: Style) {
+pub(super) fn draw_box(buffer: &mut Buffer, rect: Rect, style: Style) {
     if rect.width < 2 || rect.height < 2 {
         return;
     }

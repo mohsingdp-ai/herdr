@@ -12,6 +12,7 @@ mod agents;
 pub(crate) use agents::{AGENT_START_SETTLE_DELAY, MAX_AGENT_START_TIMEOUT};
 mod api;
 pub(crate) use api::git::is_git_method;
+pub(crate) use api::notes::is_note_method;
 pub(crate) use api::tasks::is_task_method;
 #[cfg(test)]
 pub(crate) use api::test_support::exiting_test_command;

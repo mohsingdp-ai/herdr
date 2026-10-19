@@ -350,6 +350,26 @@ mod tests {
             actual.remove("task.add_workflow").as_deref(),
             Some("df6cb17346d0fc768dba71a936655053798fb2393c7011de543775c9e9662de8")
         );
+        assert_eq!(
+            actual.remove("note.list").as_deref(),
+            Some("57d00b099428c8b72320339a037304b6f16a6385bb8425899f55a5f14d359b9b")
+        );
+        assert_eq!(
+            actual.remove("note.stamp").as_deref(),
+            Some("2f76df2eb538b45f01a12ab6751a0d66ab55ee930fca22b6a75220ca2c122871")
+        );
+        assert_eq!(
+            actual.remove("note.write").as_deref(),
+            Some("bacc0e185a36f73d2a4e1ccff856bbe6cbb98a43262b51fe21b6ca620ac96af1")
+        );
+        assert_eq!(
+            actual.remove("note.rename").as_deref(),
+            Some("decec1c9db1be50de95b851742be9b9e94d909484753a9987cbc19cd57144fcf")
+        );
+        assert_eq!(
+            actual.remove("note.delete").as_deref(),
+            Some("409e1c9e71141e080d37bba1c3d57a91c72a0d15bfb76bba2f1c5350ded03cae")
+        );
 
         assert_eq!(
             actual, expected,

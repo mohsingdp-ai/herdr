@@ -105,14 +105,17 @@ impl App {
                     return;
                 }
             };
-        let (folder, workspace_index) =
-            match self.task_folder(workspace_id.as_deref(), pane_id.as_deref()) {
-                Ok(found) => found,
-                Err((code, message)) => {
-                    let _ = respond_to.send(encode_error(id, code, message));
-                    return;
-                }
-            };
+        let (folder, workspace_index) = match self.space_folder(
+            workspace_id.as_deref(),
+            pane_id.as_deref(),
+            "backlog_not_initialized",
+        ) {
+            Ok(found) => found,
+            Err((code, message)) => {
+                let _ = respond_to.send(encode_error(id, code, message));
+                return;
+            }
+        };
         // Writes tell subscribers which space's tasks changed.
         let changed = writes.then(|| {
             (
@@ -162,12 +165,14 @@ impl App {
         self.pane_metadata(workspace_index, pane)?.agent
     }
 
-    /// Tasks belong to a space: a pane's tasks are its workspace's, so an
-    /// agent and the Board always see the same project.
-    fn task_folder(
+    /// Tasks and notes belong to a space: a pane's are its workspace's, so
+    /// an agent and the Board always see the same project. `no_folder` is
+    /// the error code for a workspace without a folder.
+    pub(super) fn space_folder(
         &self,
         workspace_id: Option<&str>,
         pane_id: Option<&str>,
+        no_folder: &'static str,
     ) -> Result<(PathBuf, usize), (&'static str, String)> {
         let workspace_index = match workspace_id {
             Some(workspace_id) => self.parse_workspace_id(workspace_id).ok_or_else(|| {
@@ -190,11 +195,6 @@ impl App {
         workspace
             .resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
             .map(|folder| (folder, workspace_index))
-            .ok_or_else(|| {
-                (
-                    "backlog_not_initialized",
-                    "workspace has no folder".to_owned(),
-                )
-            })
+            .ok_or_else(|| (no_folder, "workspace has no folder".to_owned()))
     }
 }

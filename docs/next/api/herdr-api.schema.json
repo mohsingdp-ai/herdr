@@ -2681,6 +2681,119 @@
           ],
           "type": "object"
         },
+        "NoteDeleteParams": {
+          "description": "Moves one note into the vault's `.trash` folder.",
+          "properties": {
+            "pane_id": {
+              "description": "A pane whose workspace's notes to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "description": "The workspace whose notes to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "NoteRenameParams": {
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "A pane whose workspace's notes to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "to": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "description": "The workspace whose notes to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        "NoteTarget": {
+          "description": "The space whose notes to use: a workspace, a pane's workspace, or (with\nneither) the focused pane's workspace.",
+          "properties": {
+            "pane_id": {
+              "description": "A pane whose workspace's notes to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "description": "The workspace whose notes to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "NoteWriteParams": {
+          "description": "Creates or replaces one note.",
+          "properties": {
+            "base_fingerprint": {
+              "description": "The note's `fingerprint` as last read. Without it the note is created\nand the error is `note_exists` when it already exists; with it the\nnote is replaced only when unchanged since, else `note_conflict`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "content": {
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "A pane whose workspace's notes to use, when no workspace is given. Defaults to the focused pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "description": "The note, relative to the vault root, with `/` separators, ending in `.md`.",
+              "type": "string"
+            },
+            "workspace_id": {
+              "description": "The workspace whose notes to use.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ],
+          "type": "object"
+        },
         "NotificationShowParams": {
           "properties": {
             "body": {
@@ -6684,6 +6797,86 @@
         {
           "properties": {
             "method": {
+              "const": "note.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/NoteTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "note.stamp",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/NoteTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "note.write",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/NoteWriteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "note.rename",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/NoteRenameParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "note.delete",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/NoteDeleteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.selection.read",
               "type": "string"
             },
@@ -9167,6 +9360,68 @@
             }
           ]
         },
+        "NoteFile": {
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "fingerprint": {
+              "description": "The sha256 of the file's bytes; pass it back to `note.write` to\nrefuse writing over a change made since.",
+              "type": "string"
+            },
+            "modified_ms": {
+              "description": "Last modified, in milliseconds since the Unix epoch.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "path": {
+              "description": "Relative to the vault root, with `/` separators.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "content",
+            "fingerprint",
+            "modified_ms"
+          ],
+          "type": "object"
+        },
+        "NoteVault": {
+          "description": "A project's notes: every Markdown file under its folder outside the\nrepository, shared by the repository's worktrees.",
+          "properties": {
+            "notes": {
+              "description": "Sorted by path.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/NoteFile"
+              },
+              "type": "array"
+            },
+            "project": {
+              "type": "string"
+            },
+            "root": {
+              "description": "The vault folder, absolute. It may not exist yet.",
+              "type": "string"
+            },
+            "stamp": {
+              "description": "The vault's `note.stamp` when this was read.",
+              "type": "string"
+            },
+            "truncated": {
+              "description": "Some notes were left out: too many, or too large.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "root",
+            "project",
+            "stamp",
+            "notes"
+          ],
+          "type": "object"
+        },
         "NotificationShowReason": {
           "enum": [
             "shown",
@@ -10856,6 +11111,60 @@
               },
               "required": [
                 "type",
+                "stamp"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "note_list",
+                  "type": "string"
+                },
+                "vault": {
+                  "$ref": "#/schemas/success_response/$defs/NoteVault"
+                }
+              },
+              "required": [
+                "type",
+                "vault"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "stamp": {
+                  "description": "Changes whenever a note is added, removed, renamed or changed.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "note_stamp",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "stamp"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "note": {
+                  "$ref": "#/schemas/success_response/$defs/NoteFile"
+                },
+                "stamp": {
+                  "description": "The vault's `note.stamp` after the write.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "note_saved",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "note",
                 "stamp"
               ],
               "type": "object"

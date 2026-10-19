@@ -436,7 +436,7 @@ fn commit_remote_manifest(agent: Agent, content: &str) -> Result<(), String> {
     atomic_write(&path, content.as_bytes())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("path {} has no parent", path.display()))?;
@@ -464,7 +464,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         tracing::warn!(
             path = %path.display(),
             error = %err,
-            "agent detection manifest committed but parent directory sync failed"
+            "file committed but parent directory sync failed"
         );
     }
     Ok(())

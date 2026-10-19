@@ -93,7 +93,7 @@ fn push_host_theme_update(
 impl ClientShellState {
     /// False while the git view stands in front of the panes.
     pub(crate) fn focused_pane_receives_keys(&self) -> bool {
-        self.git_view.is_none() && self.board_view.is_none()
+        self.git_view.is_none() && self.board_view.is_none() && self.notes_view.is_none()
     }
 
     pub(crate) fn host_keyboard_report_all_requested(&self) -> bool {
@@ -273,6 +273,8 @@ impl ClientShellState {
                             self.route_git_view_text(&text, &mut outcome);
                         } else if self.overlay.is_none() && self.board_view.is_some() {
                             self.route_board_view_text(&text, &mut outcome);
+                        } else if self.overlay.is_none() && self.notes_view.is_some() {
+                            self.route_notes_view_text(&text, &mut outcome);
                         } else if self.overlay.is_none() && self.mode == ClientShellMode::Terminal {
                             self.push_focused_pane_event(
                                 ClientPaneInputEvent::TextCommit(text),
@@ -310,6 +312,8 @@ impl ClientShellState {
                             outcome.repaint |= self.insert_git_view_text(&text);
                         } else if self.overlay.is_none() && self.board_view.is_some() {
                             outcome.repaint |= self.insert_board_view_text(&text);
+                        } else if self.overlay.is_none() && self.notes_view.is_some() {
+                            outcome.repaint |= self.insert_notes_view_text(&text);
                         } else if self.overlay.is_none() && self.mode == ClientShellMode::Terminal {
                             self.push_focused_pane_event(
                                 ClientPaneInputEvent::Paste(text),
@@ -571,7 +575,9 @@ impl ClientShellState {
             return true;
         }
         if self.overlay.is_none()
-            && (self.git_view_text_field_focused() || self.board_view_text_field_focused())
+            && (self.git_view_text_field_focused()
+                || self.board_view_text_field_focused()
+                || self.notes_view_text_field_focused())
         {
             return true;
         }
@@ -619,7 +625,8 @@ impl ClientShellState {
             let inserted = self.insert_copy_search_text(&text)
                 || self.insert_overlay_text(&text)
                 || (self.overlay.is_none() && self.insert_git_view_text(&text))
-                || (self.overlay.is_none() && self.insert_board_view_text(&text));
+                || (self.overlay.is_none() && self.insert_board_view_text(&text))
+                || (self.overlay.is_none() && self.insert_notes_view_text(&text));
             outcome.repaint |= inserted;
         }
         true
@@ -707,6 +714,10 @@ impl ClientShellState {
                     self.route_board_view_key(key, outcome);
                     return None;
                 }
+                if self.notes_view.is_some() {
+                    self.route_notes_view_key(key, outcome);
+                    return None;
+                }
                 self.focused_pane_id().map(ClientInputTarget::Pane)
             }
             ClientShellMode::Prefix => {
@@ -721,7 +732,10 @@ impl ClientShellState {
                     self.mode = return_mode;
                     outcome.repaint = true;
                     // A doubled prefix types the prefix key into the pane; the git view has none.
-                    if self.git_view.is_some() || self.board_view.is_some() {
+                    if self.git_view.is_some()
+                        || self.board_view.is_some()
+                        || self.notes_view.is_some()
+                    {
                         return None;
                     }
                     return self.focused_pane_id().map(ClientInputTarget::Pane);
@@ -765,6 +779,8 @@ impl ClientShellState {
                     self.route_git_view_key(key, outcome);
                 } else if self.board_view.is_some() {
                     self.route_board_view_key(key, outcome);
+                } else if self.notes_view.is_some() {
+                    self.route_notes_view_key(key, outcome);
                 } else {
                     self.route_copy_mode_key(key, outcome);
                 }
@@ -1108,7 +1124,9 @@ impl ClientShellState {
         ClientInputContext {
             mode: self.mode,
             overlay: self.overlay.as_ref().map(ClientShellOverlay::kind),
-            git_view: self.git_view.is_some() || self.board_view.is_some(),
+            git_view: self.git_view.is_some()
+                || self.board_view.is_some()
+                || self.notes_view.is_some(),
             popup_terminal_id: self.popup_input_target().and_then(|target| match target {
                 ClientInputTarget::Popup(terminal_id) => Some(terminal_id),
                 ClientInputTarget::Pane(_) => None,
@@ -1156,6 +1174,7 @@ impl ClientShellState {
             || self.overlay.is_some()
             || self.git_view.is_some()
             || self.board_view.is_some()
+            || self.notes_view.is_some()
             || self.mode != ClientShellMode::Terminal
         {
             return None;
