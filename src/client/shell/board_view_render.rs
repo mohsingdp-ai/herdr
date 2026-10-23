@@ -144,7 +144,7 @@ impl ClientBoardView {
             }
         }
         if let Some(text) = geometry.details_text() {
-            let lines = detail_lines(self, text.width, &Styles::new(palette)).len();
+            let lines = detail_lines(self, text.width, &Styles::new(palette, &[])).len();
             self.details_scroll = self
                 .details_scroll
                 .min(lines.saturating_sub(usize::from(text.height)));
@@ -152,7 +152,7 @@ impl ClientBoardView {
     }
 }
 
-struct Styles {
+struct Styles<'a> {
     base: Style,
     dim: Style,
     muted: Style,
@@ -168,10 +168,12 @@ struct Styles {
     panel: Style,
     contrast: Color,
     palette: Palette,
+    /// The live agents, for the state of the one working on a task.
+    agents: &'a [crate::protocol::ClientShellAgent],
 }
 
-impl Styles {
-    fn new(p: &Palette) -> Self {
+impl<'a> Styles<'a> {
+    fn new(p: &Palette, agents: &'a [crate::protocol::ClientShellAgent]) -> Self {
         let base = Style::default().fg(p.text);
         let contrast = match p.panel_bg {
             Color::Reset => p.surface_dim,
@@ -196,7 +198,20 @@ impl Styles {
             panel: base.bg(p.panel_bg),
             contrast,
             palette: p.clone(),
+            agents,
         }
+    }
+
+    /// The agent pane working on `task`, while it is still open: its ID,
+    /// its agent's name and the color of its state.
+    fn task_agent(&self, task: &TaskSummary) -> Option<(&'a str, &'a str, Color)> {
+        let pane_id = task.pane_id.as_deref()?;
+        let agent = self.agents.iter().find(|agent| agent.pane_id == pane_id)?;
+        Some((
+            agent.pane_id.as_str(),
+            agent.agent.as_deref().unwrap_or("agent"),
+            super::status_color(agent.agent_status, &self.palette),
+        ))
     }
 
     /// A status's color: the usual Backlog.md names get their own, others stay muted.
@@ -308,9 +323,10 @@ pub(super) fn render_board_view(
     view: &ClientBoardView,
     space_label: &str,
     palette: &Palette,
+    agents: &[crate::protocol::ClientShellAgent],
 ) -> BoardViewFrame {
     let area = area.intersection(buffer.area);
-    let styles = Styles::new(palette);
+    let styles = Styles::new(palette, agents);
     for y in area.y..area.bottom() {
         for x in area.x..area.right() {
             buffer[(x, y)].set_symbol(" ").set_style(Style::reset());
@@ -695,18 +711,26 @@ fn render_card(
             x += 1;
         }
         x = put_segment(buffer, x, y, end, &task.id, on(styles.muted));
-        if let Some(agent) = task.assignees.first() {
+        let live = styles.task_agent(task);
+        if let Some(agent) = task
+            .assignees
+            .first()
+            .map(String::as_str)
+            .or(live.map(|(_, name, _)| name))
+        {
             let name = format!("● {}", agent_name(agent));
             let width = display_width(&name);
             if x + 2 + width <= end {
-                put_text(
-                    buffer,
-                    end - width,
-                    y,
-                    width,
-                    &name,
-                    on(styles.agent(agent)),
-                );
+                let start = end - width;
+                put_text(buffer, start, y, width, &name, on(styles.agent(agent)));
+                // A live agent's dot shows its state, and a click goes to its pane.
+                if let Some((pane_id, _, color)) = live {
+                    put_text(buffer, start, y, 1, "●", on(Style::default().fg(color)));
+                    hits.targets.push((
+                        Rect::new(start, y, width, 1),
+                        BoardTarget::FocusPane(pane_id.to_owned()),
+                    ));
+                }
             }
         }
         y += 1;
@@ -1249,7 +1273,7 @@ fn render_list(
                     indent: 0,
                     children,
                 };
-                render_list_row(buffer, area, &columns, y, row, view, styles);
+                render_list_row(buffer, area, &columns, y, row, view, styles, hits);
             }
             BoardRow::Subtask { task, last } => {
                 hits.targets.push((
@@ -1262,7 +1286,7 @@ fn render_list(
                     indent: 2,
                     children: 0,
                 };
-                render_list_row(buffer, area, &columns, y, row, view, styles);
+                render_list_row(buffer, area, &columns, y, row, view, styles, hits);
             }
         }
     }
@@ -1302,6 +1326,7 @@ fn render_list_row(
     row: ListRow<'_>,
     view: &ClientBoardView,
     styles: &Styles,
+    hits: &mut BoardViewHits,
 ) {
     let task = row.task;
     let selected = view.selected.as_ref() == Some(&task.id) && view.details_open;
@@ -1408,7 +1433,13 @@ fn render_list_row(
             styles.status_pill(&task.status),
         );
     }
-    match task.assignees.first() {
+    let live = styles.task_agent(task);
+    match task
+        .assignees
+        .first()
+        .map(String::as_str)
+        .or(live.map(|(_, name, _)| name))
+    {
         Some(agent) => {
             let text = format!("● {}", agent_name(agent));
             put_text(
@@ -1419,6 +1450,20 @@ fn render_list_row(
                 &fit(&text, AGENT_WIDTH - 1),
                 bg(styles.agent(agent)),
             );
+            if let Some((pane_id, _, color)) = live {
+                put_text(
+                    buffer,
+                    columns.agent,
+                    y,
+                    1,
+                    "●",
+                    bg(Style::default().fg(color)),
+                );
+                hits.targets.push((
+                    Rect::new(columns.agent, y, AGENT_WIDTH - 1, 1),
+                    BoardTarget::FocusPane(pane_id.to_owned()),
+                ));
+            }
         }
         None => put_text(buffer, columns.agent, y, 1, "—", bg(styles.dim)),
     }

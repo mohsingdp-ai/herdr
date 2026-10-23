@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::api::schema::{EventData, EventEnvelope, EventKind, Method, Request, ResponseResult};
+use crate::api::schema::{
+    EventData, EventEnvelope, EventKind, Method, Request, ResponseResult, TaskDetail,
+};
 use crate::app::App;
 use crate::tasks::{self, TaskError};
 
@@ -23,8 +25,17 @@ pub(crate) fn is_task_method(method: &Method) -> bool {
     )
 }
 
-fn detail(task: crate::api::schema::TaskDetail) -> ResponseResult {
+fn detail(task: TaskDetail) -> ResponseResult {
     ResponseResult::TaskDetail { task }
+}
+
+/// Links the task to the agent pane that created or changed it.
+fn linked(folder: &std::path::Path, mut task: TaskDetail, pane_id: Option<&str>) -> TaskDetail {
+    if let Some(pane_id) = pane_id {
+        tasks::link_pane(folder, &task.summary.id, pane_id);
+        task.summary.pane_id = Some(pane_id.to_owned());
+    }
+    task
 }
 
 fn board(board: crate::api::schema::TaskBoardInfo) -> ResponseResult {
@@ -50,7 +61,7 @@ impl App {
         );
         // An agent's request (its pane runs a detected agent) follows the
         // workflow's agent rules; the Board and a person's shell do not.
-        let agent = self.caller_agent(&request.method);
+        let (agent, agent_pane) = self.caller_agent(&request.method).unzip();
         let (workspace_id, pane_id, work): (Option<String>, Option<String>, TaskWork) =
             match request.method {
                 Method::TaskList(target) => (
@@ -79,14 +90,16 @@ impl App {
                     params.workspace_id.clone(),
                     params.pane_id.clone(),
                     Box::new(move |folder| {
-                        tasks::create(&folder, &params, agent.as_deref()).map(detail)
+                        tasks::create(&folder, &params, agent.as_deref())
+                            .map(|task| detail(linked(&folder, task, agent_pane.as_deref())))
                     }),
                 ),
                 Method::TaskUpdate(params) => (
                     params.workspace_id.clone(),
                     params.pane_id.clone(),
                     Box::new(move |folder| {
-                        tasks::update(&folder, &params, agent.as_deref()).map(detail)
+                        tasks::update(&folder, &params, agent.as_deref())
+                            .map(|task| detail(linked(&folder, task, agent_pane.as_deref())))
                     }),
                 ),
                 Method::TaskArchive(params) => (
@@ -150,16 +163,18 @@ impl App {
         }
     }
 
-    /// The agent running in the pane a request names, if any. Only a pane
-    /// named by the request counts, never the focused one.
-    fn caller_agent(&self, method: &Method) -> Option<String> {
+    /// The agent running in the pane a request names, if any, with that
+    /// pane's public ID. Only a pane named by the request counts, never the
+    /// focused one.
+    fn caller_agent(&self, method: &Method) -> Option<(String, String)> {
         let pane_id = match method {
             Method::TaskCreate(params) => params.pane_id.as_deref(),
             Method::TaskUpdate(params) => params.pane_id.as_deref(),
             _ => None,
         }?;
         let (workspace_index, pane) = self.resolve_optional_pane(Some(pane_id))?;
-        self.pane_metadata(workspace_index, pane)?.agent
+        let agent = self.pane_metadata(workspace_index, pane)?.agent?;
+        Some((agent, self.public_pane_id(workspace_index, pane)?))
     }
 
     /// Tasks belong to a space: a pane's tasks are its workspace's, so an

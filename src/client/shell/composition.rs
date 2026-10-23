@@ -432,6 +432,7 @@ impl ClientShellState {
                 view,
                 label,
                 &self.config.palette,
+                &snapshot.agents,
             );
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, rendered.cursor);
             self.hits.board_view = rendered.hits;

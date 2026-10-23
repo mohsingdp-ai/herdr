@@ -135,6 +135,7 @@ fn task(id: &str, title: &str, status: &str) -> TaskSummary {
         description_preview: None,
         acceptance_criteria_checked: 0,
         acceptance_criteria_total: 1,
+        pane_id: None,
         fingerprint: format!("fp-{id}"),
     }
 }
@@ -919,4 +920,64 @@ fn kanban_cards_carry_their_subtasks_and_pull_request() {
     let opened = click(&mut state, link);
     assert!(opened.actions.iter().any(|action| matches!(action,
         ClientShellAction::OpenSafeWebUrl(url) if url == "https://github.com/o/r/pull/42")));
+}
+
+#[test]
+fn a_task_shows_its_agents_live_state_and_goes_to_its_pane() {
+    let mut state = state();
+    let mut projected = snapshot();
+    projected.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("claude".into()),
+        display_agent: None,
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Blocked,
+        state_change_seq: 0,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    }];
+    state.set_snapshot(Box::new(projected));
+    let opened = open_by_tab(&mut state);
+    let list = opened
+        .iter()
+        .find(|request| matches!(&request.method, Method::TaskList(_)))
+        .expect("the list is asked for");
+    let ResponseResult::TaskList { mut board } = board() else {
+        unreachable!()
+    };
+    board.tasks[1].pane_id = Some("pane_1".into());
+    // A pane that has closed since shows no state.
+    board.tasks[0].pane_id = Some("pane_gone".into());
+    answer(&mut state, list, Ok(ResponseResult::TaskList { board }));
+    screen(&mut state, 150);
+
+    assert!(
+        !state.hits.board_view.targets.iter().any(
+            |(_, target)| matches!(target, BoardTarget::FocusPane(pane) if pane == "pane_gone")
+        ),
+        "a closed pane is not offered"
+    );
+    let dot = target(&state, &BoardTarget::FocusPane("pane_1".into()));
+    let frame = state.compose(150, 34).expect("frame");
+    let cell = &frame.cells[usize::from(dot.y) * usize::from(frame.width) + usize::from(dot.x)];
+    assert_eq!(cell.symbol, "●");
+    assert_eq!(
+        cell.fg,
+        crate::protocol::color_to_u32(state.config.palette.red),
+        "a blocked agent's dot is red"
+    );
+
+    let sent = requests(click(&mut state, dot).actions);
+    assert!(
+        state.board_view.is_none(),
+        "the Board gives way to the pane"
+    );
+    assert!(sent.iter().any(|request| matches!(&request.method,
+        Method::PaneFocus(target) if target.pane_id == "pane_1")));
 }

@@ -1455,6 +1455,13 @@ impl ClientShellState {
             BoardTarget::OpenUrl(url) => {
                 outcome.actions.push(ClientShellAction::OpenSafeWebUrl(url));
             }
+            BoardTarget::FocusPane(pane_id) => {
+                self.close_board_view(outcome);
+                self.push_endpoint_method(
+                    Method::PaneFocus(crate::api::schema::PaneTarget { pane_id }),
+                    outcome,
+                );
+            }
             BoardTarget::NextStatus(id) => {
                 let next = self.board_view.as_ref().and_then(|view| {
                     let task = view.task(&id)?;
@@ -1811,6 +1818,8 @@ pub(super) enum BoardTarget {
     NextStatus(String),
     /// A link, such as a pull request: a click opens it in the browser.
     OpenUrl(String),
+    /// The dot of the agent working on a task: a click goes to its pane.
+    FocusPane(String),
     CloseDetails,
     /// Takes a click so nothing under it does.
     Nothing,
@@ -1848,6 +1857,7 @@ mod tests {
             description_preview: None,
             acceptance_criteria_checked: 0,
             acceptance_criteria_total: 0,
+            pane_id: None,
             fingerprint: id.into(),
         }
     }

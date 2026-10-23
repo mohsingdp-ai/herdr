@@ -101,7 +101,9 @@ pub(crate) fn list(folder: &Path) -> Result<TaskBoardInfo> {
         .into_iter()
         .map(|task| {
             let file = files.remove(&task.id.to_ascii_uppercase());
-            task.into_summary(file)
+            let mut summary = task.into_summary(file);
+            summary.pane_id = linked_pane(&project.root, &summary.id);
+            summary
         })
         .collect();
     Ok(TaskBoardInfo {
@@ -116,6 +118,36 @@ pub(crate) fn list(folder: &Path) -> Result<TaskBoardInfo> {
 /// and times, so a Board can ask every few seconds.
 pub(crate) fn stamp(folder: &Path) -> Result<String> {
     Ok(Project::find(folder)?.stamp())
+}
+
+/// Remembers that the agent in `pane_id` created or changed task `id`, so
+/// reads can say which pane is working on it. Kept only in memory: pane IDs
+/// do not outlive the server either.
+pub(crate) fn link_pane(folder: &Path, id: &str, pane_id: &str) {
+    let Ok(project) = Project::find(folder) else {
+        return;
+    };
+    agent_panes(|panes| {
+        panes.insert((project.root, id.to_ascii_uppercase()), pane_id.to_owned());
+    });
+}
+
+fn linked_pane(root: &Path, id: &str) -> Option<String> {
+    agent_panes(|panes| {
+        panes
+            .get(&(root.to_path_buf(), id.to_ascii_uppercase()))
+            .cloned()
+    })
+}
+
+fn agent_panes<T>(work: impl FnOnce(&mut HashMap<(PathBuf, String), String>) -> T) -> T {
+    static PANES: Mutex<Option<HashMap<(PathBuf, String), String>>> = Mutex::new(None);
+    work(
+        PANES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_or_insert_with(HashMap::new),
+    )
 }
 
 pub(crate) fn get(folder: &Path, id: &str) -> Result<TaskDetail> {
@@ -401,7 +433,9 @@ impl Project {
             &self.root,
             &["task", "view", file.id.as_str(), "--json"],
         )?)?;
-        Ok(view.task.into_detail(file))
+        let mut detail = view.task.into_detail(file);
+        detail.summary.pane_id = linked_pane(&self.root, &detail.summary.id);
+        Ok(detail)
     }
 }
 
@@ -828,6 +862,7 @@ impl TaskJson {
             description_preview,
             acceptance_criteria_checked: self.acceptance_criteria_completed,
             acceptance_criteria_total: self.acceptance_criteria_count,
+            pane_id: None,
             fingerprint,
         }
     }
@@ -893,6 +928,20 @@ mod tests {
         std::fs::remove_file(link.join("commondir")).unwrap();
         assert_eq!(in_main_checkout(&worktree), worktree);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_tasks_agent_pane_is_found_from_any_folder_of_its_project() {
+        let root = std::env::temp_dir().join(format!("herdr-tasks-pane-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("backlog.config.yml"), "").unwrap();
+        assert_eq!(linked_pane(&root, "TASK-7"), None);
+        link_pane(&root.join("src"), "task-7", "ws_1:p2");
+        assert_eq!(linked_pane(&root, "TASK-7").as_deref(), Some("ws_1:p2"));
+        // A later agent takes it over.
+        link_pane(&root, "TASK-7", "ws_1:p3");
+        assert_eq!(linked_pane(&root, "task-7").as_deref(), Some("ws_1:p3"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -12329,6 +12329,13 @@
                 "null"
               ]
             },
+            "pane_id": {
+              "description": "The pane of the agent that last created or changed the task, as long\nas the server that saw it keeps running.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "parent_id": {
               "description": "The task this one is a subtask of.",
               "type": [
@@ -12427,6 +12434,13 @@
               "type": "array"
             },
             "milestone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "description": "The pane of the agent that last created or changed the task, as long\nas the server that saw it keeps running.",
               "type": [
                 "string",
                 "null"

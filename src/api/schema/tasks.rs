@@ -209,6 +209,10 @@ pub struct TaskSummary {
     pub acceptance_criteria_checked: u32,
     #[serde(default)]
     pub acceptance_criteria_total: u32,
+    /// The pane of the agent that last created or changed the task, as long
+    /// as the server that saw it keeps running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
     /// Changes whenever the task's file changes; pass it back to `task.update`
     /// to refuse writing over a change made since.
     pub fingerprint: String,
