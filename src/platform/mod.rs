@@ -237,6 +237,19 @@ pub(crate) fn stop_process_tree(child: &mut std::process::Child, _grace: std::ti
     let _ = child.wait();
 }
 
+// Tests inject their own probe because the recorded hangup is process-global.
+#[cfg_attr(test, allow(dead_code))]
+pub(crate) fn server_hangup_is_recent() -> bool {
+    #[cfg(unix)]
+    {
+        unix_common::server_hangup_is_recent()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 #[cfg(not(any(unix, windows)))]
 pub(crate) fn classify_child_exit(_status: &portable_pty::ExitStatus) -> ChildExitReason {
     ChildExitReason::Exited
