@@ -2380,6 +2380,10 @@ async fn run_client_loop(
                         let board = shell.tick_board_view(now);
                         outcome.repaint |= board.repaint;
                         outcome.actions.extend(board.actions);
+                        let notes = shell.tick_notes_view(now);
+                        outcome.repaint |= notes.repaint;
+                        outcome.actions.extend(notes.actions);
+                        outcome.requests.extend(notes.requests);
                         for expired in expired_endpoints {
                             if !shell.endpoint_is_active(&expired.endpoint_id) {
                                 continue;

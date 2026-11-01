@@ -313,6 +313,7 @@ pub(in crate::client::shell) fn render_stand_in_tab(
         .map(|(rect, _)| *rect)
         .into_iter()
         .chain((hits.board_tab.width > 0).then_some(hits.board_tab))
+        .chain((hits.notes_tab.width > 0).then_some(hits.notes_tab))
         .map(|rect| rect.right().saturating_add(1))
         .max()
         .unwrap_or(content.x);

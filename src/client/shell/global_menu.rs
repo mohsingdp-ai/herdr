@@ -55,6 +55,10 @@ pub(super) fn global_menu_items(
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::BoardView),
     ));
     items.push((
+        "notes",
+        ClientGlobalMenuAction::Binding(crate::input::KeybindAction::NotesView),
+    ));
+    items.push((
         "detach",
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
     ));

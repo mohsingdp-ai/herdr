@@ -114,6 +114,9 @@ pub(super) struct ShellHitMap {
     pub(super) board_view: super::board_view::BoardViewHits,
     /// The Board's stand-in tab in the tab bar.
     pub(super) board_tab: Rect,
+    pub(super) notes_view: super::notes_view::NotesViewHits,
+    /// The Notes stand-in tab in the tab bar.
+    pub(super) notes_tab: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,
@@ -262,6 +265,8 @@ pub(crate) enum ClientShellAction {
     },
     ClipboardWrite(Vec<u8>),
     OpenSafeWebUrl(String),
+    /// Open a local folder in the desktop's file manager.
+    OpenPath(String),
     ActivateEndpoint {
         endpoint_id: ClientEndpointId,
         target: Option<ClientEndpointFocusTarget>,
@@ -706,6 +711,10 @@ pub(super) enum PendingEndpointKind {
         generation: u64,
         request: super::board_view::BoardRequest,
     },
+    Notes {
+        generation: u64,
+        request: super::notes_view::NotesRequest,
+    },
     SelectionCopy,
     PaneScroll {
         pane_id: String,
@@ -984,6 +993,18 @@ pub(crate) struct ClientShellState {
     pub(super) board_view_needs_load: bool,
     /// Projects whose Board shows the kanban view (the list is the default).
     pub(super) board_kanban_roots: std::collections::BTreeSet<String>,
+    /// Notes, shown in place of the focused space's panes.
+    pub(super) notes_view: Option<super::notes_view::ClientNotesView>,
+    pub(super) notes_view_generation: u64,
+    /// A retarget made a new Notes view that the next tick loads.
+    pub(super) notes_view_needs_load: bool,
+    /// Another tab was chosen; the next tick saves and closes Notes.
+    pub(super) notes_view_closing: bool,
+    /// Focus moved to this space while a note had unsaved typing; the next
+    /// tick saves it, then follows.
+    pub(super) notes_view_retarget: Option<String>,
+    /// The note last open in each project, by notes folder, for this session.
+    pub(super) notes_last_open: std::collections::HashMap<String, String>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
     pub(super) link_hover: Option<super::link_hover::LinkHover>,
@@ -1171,6 +1192,12 @@ impl ClientShellState {
             board_view_generation: 0,
             board_view_needs_load: false,
             board_kanban_roots: preferences.board_kanban_roots.iter().cloned().collect(),
+            notes_view: None,
+            notes_view_generation: 0,
+            notes_view_needs_load: false,
+            notes_view_closing: false,
+            notes_view_retarget: None,
+            notes_last_open: std::collections::HashMap::new(),
             previous_pane_id: None,
             pane_mouse_gesture: None,
             link_hover: None,
@@ -1685,6 +1712,7 @@ impl ClientShellState {
         self.reconcile_pending_workspace_highlight();
         self.retarget_git_view();
         self.retarget_board_view();
+        self.retarget_notes_view();
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
             let matching = self.snapshot.as_ref().is_some_and(|snapshot| {

@@ -67,6 +67,7 @@ pub(crate) enum KeybindAction {
     ToggleEditor,
     GitView,
     BoardView,
+    NotesView,
     Help,
     Settings,
     ReloadConfig,
@@ -138,6 +139,7 @@ pub(crate) fn resolve_non_indexed_action(
         (&keybinds.toggle_editor, KeybindAction::ToggleEditor),
         (&keybinds.git_view, KeybindAction::GitView),
         (&keybinds.board_view, KeybindAction::BoardView),
+        (&keybinds.notes_view, KeybindAction::NotesView),
         (&keybinds.cycle_pane_next, KeybindAction::CyclePaneNext),
         (
             &keybinds.cycle_pane_previous,

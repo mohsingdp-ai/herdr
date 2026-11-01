@@ -619,6 +619,7 @@ impl ClientShellState {
         }
         // One stand-in tab at a time.
         self.board_view = None;
+        self.close_notes_view(outcome);
         let reuse = self.git_view.as_ref().is_some_and(|view| {
             view.workspace_id == target && view.pane_id == pane_id && view.boot_id == boot_id
         });

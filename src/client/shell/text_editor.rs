@@ -113,38 +113,7 @@ impl TextEditor {
     }
 
     fn word_boundary(&self, backward: bool) -> usize {
-        let class = |grapheme: &str| {
-            let ch = grapheme.chars().next().unwrap_or(' ');
-            if ch.is_whitespace() {
-                0
-            } else if ch.is_alphanumeric() || ch == '_' {
-                1
-            } else {
-                2
-            }
-        };
-        let mut boundary = self.cursor;
-        let mut run = 0;
-        if backward {
-            for (index, grapheme) in self.text[..self.cursor].grapheme_indices(true).rev() {
-                let current = class(grapheme);
-                if run != 0 && current != run {
-                    break;
-                }
-                run = current;
-                boundary = index;
-            }
-        } else {
-            for (index, grapheme) in self.text[self.cursor..].grapheme_indices(true) {
-                let current = class(grapheme);
-                if run != 0 && current != run {
-                    break;
-                }
-                run = current;
-                boundary = self.cursor + index + grapheme.len();
-            }
-        }
-        boundary
+        word_boundary(&self.text, self.cursor, backward)
     }
 
     fn remove(&mut self, start: usize, end: usize, kill: bool) {
@@ -262,6 +231,44 @@ impl TextEditor {
         }
         (&self.text[start..end], cells as u16)
     }
+}
+
+/// Word run class shared with the note editor: 0 whitespace, 1 word, 2 punctuation.
+pub(super) fn word_class(grapheme: &str) -> u8 {
+    let ch = grapheme.chars().next().unwrap_or(' ');
+    if ch.is_whitespace() {
+        0
+    } else if ch.is_alphanumeric() || ch == '_' {
+        1
+    } else {
+        2
+    }
+}
+
+/// Byte offset of the word boundary before or after `cursor` within one line.
+pub(super) fn word_boundary(text: &str, cursor: usize, backward: bool) -> usize {
+    let mut boundary = cursor;
+    let mut run = 0;
+    if backward {
+        for (index, grapheme) in text[..cursor].grapheme_indices(true).rev() {
+            let current = word_class(grapheme);
+            if run != 0 && current != run {
+                break;
+            }
+            run = current;
+            boundary = index;
+        }
+    } else {
+        for (index, grapheme) in text[cursor..].grapheme_indices(true) {
+            let current = word_class(grapheme);
+            if run != 0 && current != run {
+                break;
+            }
+            run = current;
+            boundary = cursor + index + grapheme.len();
+        }
+    }
+    boundary
 }
 
 pub(super) fn render(

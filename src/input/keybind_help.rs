@@ -205,6 +205,7 @@ pub(crate) fn keybind_help_groups(
                 entry(binding_label(&keybinds.toggle_editor), "toggle editor"),
                 entry(binding_label(&keybinds.git_view), "git view"),
                 entry(binding_label(&keybinds.board_view), "task board"),
+                entry(binding_label(&keybinds.notes_view), "notes"),
             ],
         ),
     ];

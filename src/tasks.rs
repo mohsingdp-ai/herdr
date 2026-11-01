@@ -442,7 +442,7 @@ impl Project {
 /// The same place in the main checkout when `folder` is inside a linked git
 /// worktree, otherwise `folder` itself. Reads only git's small pointer files
 /// (`.git` and `commondir`), never runs git, so a Board's stamp stays cheap.
-fn in_main_checkout(folder: &Path) -> PathBuf {
+pub(crate) fn in_main_checkout(folder: &Path) -> PathBuf {
     let main = || {
         let worktree = folder.ancestors().find(|dir| dir.join(".git").exists())?;
         // A main checkout's `.git` is a folder, so this read fails for it.
@@ -460,8 +460,12 @@ fn in_main_checkout(folder: &Path) -> PathBuf {
 }
 
 /// Runs `work` holding the write lock of the project at `root`: one `backlog`
-/// write per project at a time, while other projects are not held up.
-fn locked<T>(root: &Path, work: impl FnOnce() -> Result<T>) -> Result<T> {
+/// write per project at a time, while other projects are not held up. Notes
+/// take the same lock by their own vault folder.
+pub(crate) fn locked<T, E>(
+    root: &Path,
+    work: impl FnOnce() -> std::result::Result<T, E>,
+) -> std::result::Result<T, E> {
     static LOCKS: Mutex<Option<HashMap<PathBuf, Arc<Mutex<()>>>>> = Mutex::new(None);
     let project = Arc::clone(
         LOCKS

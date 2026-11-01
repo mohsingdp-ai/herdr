@@ -1856,6 +1856,9 @@ impl ClientShellState {
         if self.board_view.is_some() && self.route_board_view_mouse(mouse, outcome) {
             return;
         }
+        if self.notes_view.is_some() && self.route_notes_view_mouse(mouse, outcome) {
+            return;
+        }
 
         if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
             let selection_hit = self.active_selection_pane();
@@ -2192,6 +2195,10 @@ impl ClientShellState {
                     self.toggle_board_view(outcome);
                     return;
                 }
+                if super::contains(self.hits.notes_tab, point) {
+                    self.toggle_notes_view(outcome);
+                    return;
+                }
                 if super::contains(self.hits.new_tab, point) {
                     self.record_binding(
                         crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewTab),
@@ -2342,6 +2349,7 @@ impl ClientShellState {
                     // Choosing an agent means its terminal, not the git view over it.
                     self.close_git_view(outcome);
                     self.close_board_view(outcome);
+                    self.close_notes_view(outcome);
                     self.push_endpoint_method(
                         crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
                             pane_id,

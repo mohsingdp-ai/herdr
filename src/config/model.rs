@@ -440,6 +440,8 @@ pub struct KeysConfig {
     pub git_view: BindingConfig,
     /// Show or hide the focused space's task Board (Backlog.md). Unset by default.
     pub board_view: BindingConfig,
+    /// Show or hide the focused space's notes (markdown, Obsidian style). Unset by default.
+    pub notes_view: BindingConfig,
     /// Split pane vertically (side by side). Default: "prefix+v"
     pub split_vertical: BindingConfig,
     /// Split pane horizontally (stacked). Default: "prefix+minus"
@@ -583,6 +585,7 @@ pub(crate) struct KeysConfigOverlay {
     git_view: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     board_view: Option<BindingConfig>,
+    notes_view: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     split_vertical: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -708,6 +711,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(toggle_editor);
         apply_field!(git_view);
         apply_field!(board_view);
+        apply_field!(notes_view);
         apply_field!(split_vertical);
         apply_field!(split_horizontal);
         apply_field!(close_pane);
@@ -816,6 +820,7 @@ impl KeysConfig {
         copy_effective_action_field!(toggle_editor, keybinds.toggle_editor);
         copy_effective_action_field!(git_view, keybinds.git_view);
         copy_effective_action_field!(board_view, keybinds.board_view);
+        copy_effective_action_field!(notes_view, keybinds.notes_view);
         copy_effective_action_field!(split_vertical, keybinds.split_vertical);
         copy_effective_action_field!(split_horizontal, keybinds.split_horizontal);
         copy_effective_action_field!(close_pane, keybinds.close_pane);
@@ -1195,6 +1200,7 @@ impl Default for KeysConfig {
             toggle_editor: BindingConfig::empty(),
             git_view: BindingConfig::empty(),
             board_view: BindingConfig::empty(),
+            notes_view: BindingConfig::empty(),
             split_vertical: BindingConfig::one("prefix+v"),
             split_horizontal: BindingConfig::one("prefix+minus"),
             close_pane: BindingConfig::one("prefix+x"),

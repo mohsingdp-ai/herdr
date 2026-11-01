@@ -608,6 +608,7 @@ impl ClientShellState {
             );
         }
         self.close_git_view(outcome);
+        self.close_notes_view(outcome);
         let reuse = self
             .board_view
             .as_ref()

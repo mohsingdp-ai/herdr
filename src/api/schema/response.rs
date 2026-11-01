@@ -8,6 +8,7 @@ use super::git::{GitCommitFile, GitCommitInfo, GitFileDiff, GitStatusInfo};
 use super::integrations::{
     IntegrationInstallResult, IntegrationTarget, IntegrationUninstallResult,
 };
+use super::notes::{NoteFile, NoteVault};
 use super::panes::{
     LayoutDescription, PaneEdgesResult, PaneFocusDirectionResult, PaneInfo, PaneLayoutSnapshot,
     PaneMoveResult, PaneNeighborResult, PaneProcessInfo, PaneReadResult, PaneResizeResult,
@@ -104,6 +105,22 @@ pub enum ResponseResult {
     TaskStamp {
         /// Changes whenever a task file or the project config changes.
         stamp: String,
+    },
+    NoteList {
+        vault: NoteVault,
+    },
+    NoteStamp {
+        /// Changes whenever a note is added, removed, renamed or changed.
+        stamp: String,
+    },
+    NoteSaved {
+        note: NoteFile,
+        /// The vault's `note.stamp` after the write.
+        stamp: String,
+    },
+    NoteAttached {
+        /// The saved image, relative to the vault root.
+        path: String,
     },
     WorktreeList {
         source: WorktreeSourceInfo,
