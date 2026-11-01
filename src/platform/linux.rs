@@ -317,6 +317,78 @@ pub(crate) fn pane_custom_command_pty_builder_platform(
     portable_pty::CommandBuilder::from_argv(raw_command_argv(command, "-c"))
 }
 
+/// Runs the pane in its own transient systemd user scope. Without this every
+/// pane shares herdr's cgroup, so when one pane runs away with memory,
+/// systemd-oomd kills the whole cgroup: herdr and every other pane with it.
+/// `systemd-run --scope` execs the command in place, so the pane keeps the
+/// same pid, env, cwd and controlling tty. Skipped when there is no usable
+/// systemd user manager (probed once).
+pub(crate) fn in_own_memory_scope_platform(
+    mut command: portable_pty::CommandBuilder,
+) -> portable_pty::CommandBuilder {
+    // --expand-environment=no keeps systemd-run from rewriting `${VAR}` in
+    // pane commands; systemd older than 254 rejects it and the probe fails.
+    const SYSTEMD_RUN_ARGS: [&str; 6] = [
+        "--user",
+        "--scope",
+        "--quiet",
+        "--collect",
+        "--expand-environment=no",
+        "--description=herdr pane",
+    ];
+    static SCOPES_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let available = *SCOPES_AVAILABLE.get_or_init(|| {
+        std::process::Command::new("systemd-run")
+            .args(SYSTEMD_RUN_ARGS)
+            .args(["--", "true"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    });
+    // A missing program must keep failing at spawn so herdr reports it;
+    // behind systemd-run it would only fail after the exec.
+    if !available || !program_resolves(&command) {
+        return command;
+    }
+    let mut argv: Vec<std::ffi::OsString> = std::iter::once("systemd-run")
+        .chain(SYSTEMD_RUN_ARGS)
+        .chain(["--"])
+        .map(Into::into)
+        .collect();
+    if command.is_default_prog() {
+        // Login shell: portable-pty would launch $SHELL with a "-sh" argv0,
+        // which can't survive the exec through systemd-run; `-l` is the same.
+        argv.extend([command.get_shell().into(), "-l".into()]);
+    } else {
+        argv.append(command.get_argv_mut());
+    }
+    *command.get_argv_mut() = argv;
+    command
+}
+
+fn program_resolves(command: &portable_pty::CommandBuilder) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let is_executable = |path: &std::path::Path| {
+        path.metadata()
+            .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+    };
+    // Default program: portable-pty's get_shell() already falls back to an
+    // executable shell.
+    let Some(program) = command.get_argv().first() else {
+        return true;
+    };
+    let program = std::path::Path::new(program);
+    if program.components().count() > 1 {
+        let cwd = command.get_cwd().map(std::path::Path::new);
+        return is_executable(&cwd.map_or_else(|| program.to_path_buf(), |dir| dir.join(program)));
+    }
+    command.get_env("PATH").is_some_and(|path| {
+        std::env::split_paths(path).any(|dir| is_executable(&dir.join(program)))
+    })
+}
+
 pub(crate) fn scrollback_editor_argv(path: &std::path::Path) -> std::io::Result<Vec<String>> {
     let quoted_path = shell_quote(&path.display().to_string());
     let command = format!(
@@ -1313,6 +1385,25 @@ mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
     use std::{cell::RefCell, collections::HashMap};
+
+    #[test]
+    fn memory_scope_keeps_the_command_and_never_hides_a_missing_program() {
+        let missing = portable_pty::CommandBuilder::new("__herdr_missing_program__");
+        let missing = in_own_memory_scope_platform(missing);
+        assert_eq!(missing.get_argv(), &["__herdr_missing_program__"]);
+
+        let mut sh = portable_pty::CommandBuilder::new("/bin/sh");
+        sh.arg("-c");
+        sh.arg("echo ${HERDR_UNSET-unset}");
+        let argv = in_own_memory_scope_platform(sh).get_argv().clone();
+        // Hosts without a systemd user manager leave the command untouched.
+        let output = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env_remove("HERDR_UNSET")
+            .output()
+            .expect("pane command runs");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "unset\n");
+    }
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

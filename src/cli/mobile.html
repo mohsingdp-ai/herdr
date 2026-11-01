@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#23262d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="referrer" content="no-referrer">
+<title>herdr</title>
+<style>
+/* Served by `herdr mobile`. Phone: one pane full screen, sidebar slides in full width.
+   Wide screens: sidebar and pane side by side, like the terminal app. */
+:root {
+  --bg: #1d2026; --panel: #23262d; --line: #33373f; --fg: #d8dce3; --dim: #7f8692; --faint: #555b66;
+  --idle: #a3be4c; --working: #e5c04b; --blocked: #e06c5c; --done: #7ccf8a; --dirty: #e5a04b; --ahead: #a3be4c; --branch: #c48ef0;
+  --accent: #6a9df0;
+  --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--mono); overflow: hidden; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.app { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr; }
+.side { position: absolute; inset: 0; z-index: 6; overflow: auto; background: var(--panel);
+  padding: calc(10px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  transform: translateX(-100%); transition: transform .22s ease; }
+.app[data-side="true"] .side { transform: none; }
+.sidehead { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line); color: var(--dim); }
+.toggle { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 8px; background: none; flex: none; }
+.toggle:active { background: color-mix(in srgb, var(--fg) 12%, transparent); }
+
+.ws { padding: 6px 0 10px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.ws:last-child { border-bottom: 0; }
+.wsh { display: flex; align-items: center; gap: 10px; color: var(--dim); padding: 2px 0; }
+.wsh .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wsh.cur .nm { color: var(--fg); font-weight: 600; }
+.wsh .br { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; text-align: left; position: relative;
+  padding: 1px 0 1px 20px; min-height: 34px; }
+.row::before, .brrow::before, .wt::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; border-left: 1px solid var(--faint); }
+.row.deep { padding-left: 76px; } .row.deep::before { left: 60px; }
+.row[aria-current="true"] { background: color-mix(in srgb, var(--fg) 9%, transparent); }
+.row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.row .sep { color: var(--faint); }
+.row .grow { flex: 1; }
+.brrow { padding-left: 20px; color: var(--dim); position: relative; }
+.brrow.cur { color: var(--branch); }
+.wt { padding-left: 20px; color: var(--dim); display: flex; gap: 8px; position: relative; }
+.wt .tr { color: var(--faint); padding-left: 4px; }
+.ic, .st { color: var(--k, var(--idle)); }
+.k-idle { --k: var(--idle); } .k-working { --k: var(--working); } .k-blocked { --k: var(--blocked); } .k-done { --k: var(--done); } .k-unknown { --k: var(--dim); }
+.git { color: var(--dirty); } .git.up { color: var(--ahead); }
+
+.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.ph { display: flex; align-items: center; gap: 8px; background: var(--panel); border-bottom: 1px solid var(--line); white-space: nowrap;
+  padding: calc(6px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) 6px max(6px, env(safe-area-inset-left, 0px)); }
+.ph .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.term { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 10px 12px; font: 12px/1.35 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); cursor: text; }
+/* The keys agent menus need, which phone keyboards lack. */
+.keys { display: flex; gap: 6px; background: var(--panel); border-top: 1px solid var(--line);
+  padding: 6px max(10px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
+.keys button { flex: 1; height: 44px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font: 600 16px var(--mono); touch-action: manipulation; }
+.keys button:active { background: color-mix(in srgb, var(--fg) 16%, var(--bg)); }
+/* Invisible keyboard target: tapping the screen focuses it, keystrokes go to the pane. */
+.kbd { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; font-size: 16px; }
+.note { padding: 24px; color: var(--dim); font-family: var(--ui); text-align: center; display: grid; place-content: center; gap: 8px; height: 100%; }
+.note b { color: var(--fg); }
+.banner { position: fixed; left: 50%; transform: translateX(-50%); top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 9;
+  background: var(--blocked); color: #0b0e13; font: 600 13px var(--ui); padding: 6px 12px; border-radius: 999px; }
+
+@media (min-width: 700px) {
+  .app { grid-template-columns: 340px 1fr; }
+  .side { position: static; transform: none; border-right: 1px solid var(--line); }
+  .sidehead, .ph { display: none; }
+}
+@media (min-width: 1100px) { .app { grid-template-columns: 400px 1fr; } .keys { display: none; } }
+@media (prefers-reduced-motion: reduce) { .side { transition: none; } }
+</style>
+</head>
+<body>
+<div class="app" id="app" data-side="false">
+  <aside class="side" id="side"></aside>
+  <section class="pane" id="pane"></section>
+</div>
+<div class="banner" id="banner" hidden></div>
+<script>
+"use strict";
+const ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// The token arrives in the link's #fragment so it never reaches server logs.
+let token = new URLSearchParams(location.hash.slice(1)).get("t");
+try {
+  if (token) sessionStorage.setItem("herdr-token", token); else token = sessionStorage.getItem("herdr-token");
+} catch (e) {}
+if (location.hash) history.replaceState(null, "", location.pathname);
+
+const state = { snap: null, git: {}, selected: null, side: false, fatal: null, offline: false };
+
+async function api(method, params = {}) {
+  const res = await fetch("/api", { method: "POST", headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify({ method, params }) });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 401) { state.fatal = "expired"; throw new Error("expired"); }
+  if (body.error) throw new Error(body.error.message || "request failed");
+  return body.result;
+}
+
+// ---- tree: workspaces, linked worktrees nested under their repo, agents ----
+function tree() {
+  const s = state.snap;
+  const ws = [...s.workspaces].sort((a, b) => a.number - b.number);
+  const isChild = w => w.worktree && w.worktree.is_linked_worktree;
+  const parents = ws.filter(w => !isChild(w));
+  const childrenOf = p => ws.filter(c => isChild(c) && p.worktree && c.worktree.repo_key === p.worktree.repo_key);
+  const orphans = ws.filter(c => isChild(c) && !parents.some(p => childrenOf(p).includes(c)));
+  return [...parents, ...orphans].map(w => ({ w, kids: parents.includes(w) ? childrenOf(w) : [] }));
+}
+const agentsIn = w => state.snap.agents.filter(a => a.workspace_id === w.workspace_id);
+const paneLabel = id => (state.snap.panes.find(p => p.pane_id === id) || {}).label;
+const label = a => a.name || paneLabel(a.pane_id) || a.agent;
+const icon = st => st === "idle" ? "○" : st === "unknown" ? "·" : "●";
+const folder = a => a.foreground_cwd || a.cwd || a.pane_id;
+function badge(g) {
+  if (!g) return "";
+  if (g.files && g.files.length) return `<span class="git">±${g.files.length}</span>`;
+  if (g.ahead) return `<span class="git up">↑${g.ahead}</span>`;
+  return "";
+}
+
+function row(a, deep) {
+  return `<button class="row ${deep ? "deep" : ""} k-${a.agent_status}" data-pane="${esc(a.pane_id)}" aria-current="${a.pane_id === state.selected}">
+    <span class="nm">${esc(label(a))}</span><span class="sep">·</span><span class="ic">${icon(a.agent_status)}</span><span class="st">${esc(a.agent_status)}</span><span class="grow"></span>${badge(state.git[folder(a)])}</button>`;
+}
+
+function renderSide() {
+  const sel = state.snap.agents.find(a => a.pane_id === state.selected);
+  const html = tree().map(({ w, kids }) => {
+    const branch = (state.git["ws:" + w.workspace_id] || {}).branch;
+    const cur = sel && (sel.workspace_id === w.workspace_id || kids.some(k => k.workspace_id === sel.workspace_id));
+    const head = `<div class="wsh k-${w.agent_status} ${cur ? "cur" : ""}"><span class="ic">${icon(w.agent_status)}</span><span class="nm">${esc(w.label)}</span>${!kids.length && branch ? `<span class="br">${esc(branch)}</span>` : ""}</div>`;
+    const own = agentsIn(w).map(a => row(a)).join("");
+    const nested = kids.length ? `<div class="brrow ${cur ? "cur" : ""}">${esc(branch || "")}</div>` + kids.map(k =>
+      `<div class="wt k-${k.agent_status}"><span class="tr">└─</span><span class="ic">${icon(k.agent_status)}</span><span>${esc(k.label)}</span></div>` +
+      agentsIn(k).map(a => row(a, true)).join("")).join("") : "";
+    return `<div class="ws">${head}${own}${nested}</div>`;
+  }).join("");
+  $("side").innerHTML = `<div class="sidehead"><button class="toggle" data-toggle aria-label="Hide sidebar">${ICON}</button><span>herdr</span></div>${html}`;
+}
+
+function renderPaneShell() {
+  const a = state.snap.agents.find(x => x.pane_id === state.selected);
+  if (!a) { $("pane").innerHTML = `<div class="note"><b>No agents running</b>Start one in herdr on your computer.</div>`; return; }
+  const w = state.snap.workspaces.find(x => x.workspace_id === a.workspace_id);
+  const header = `<span class="grow">${esc(w ? w.label : "")} › ${esc(label(a))}</span><span class="k-${a.agent_status}"><span class="ic">${icon(a.agent_status)}</span> <span class="st">${esc(a.agent_status)}</span></span>`;
+  if ($("pane").dataset.for === a.pane_id) { $("ph-info").innerHTML = header; return; }
+  $("pane").dataset.for = a.pane_id;
+  $("pane").innerHTML = `<div class="ph"><button class="toggle" data-toggle aria-label="Show sidebar">${ICON}</button><span id="ph-info" class="grow" style="display:flex;gap:8px">${header}</span></div>
+    <pre class="term" id="term"></pre>
+    <div class="keys"><button data-k="esc" aria-label="Escape">Esc</button><button data-k="up" aria-label="Up">↑</button><button data-k="down" aria-label="Down">↓</button><button data-k="enter" aria-label="Enter">⏎</button><button data-k="pageup" aria-label="Older messages">⇞</button><button data-k="pagedown" aria-label="Newer messages">⇟</button></div>
+    <textarea class="kbd" id="kbd" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="enter" aria-label="Type to ${esc(label(a))}"></textarea>`;
+  typed = "";
+  readPane();
+}
+
+function render() {
+  if (!token || state.fatal) {
+    $("app").innerHTML = `<div class="note" style="grid-column:1/-1"><b>${state.fatal ? "This link has expired" : "Open herdr from your computer"}</b>Run <code>herdr mobile</code> on your computer and scan the QR code.</div>`;
+    return;
+  }
+  if (!state.snap) return;
+  $("app").dataset.side = state.side;
+  renderSide();
+  renderPaneShell();
+  $("banner").hidden = !state.offline;
+  $("banner").textContent = "Can't reach your computer. Retrying…";
+}
+
+// ---- ANSI (SGR only) to HTML ----
+const BASE16 = ["#1d2026", "#e06c5c", "#a3be4c", "#e5c04b", "#6a9df0", "#c48ef0", "#56b6c2", "#d8dce3",
+  "#555b66", "#ff7a6b", "#b8d36a", "#f0d06a", "#8ab4ff", "#d6a6ff", "#7fd0db", "#ffffff"];
+function color256(n) {
+  if (n < 16) return BASE16[n];
+  if (n < 232) { n -= 16; const v = x => x ? 55 + x * 40 : 0; return `rgb(${v(Math.floor(n / 36))},${v(Math.floor(n / 6) % 6)},${v(n % 6)})`; }
+  const g = 8 + (n - 232) * 10; return `rgb(${g},${g},${g})`;
+}
+function ansiToHtml(text) {
+  let out = "", st = {}, last = 0, m;
+  const re = /\x1b\[([0-9;:?]*)([A-Za-z])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]/g;
+  const flush = s => {
+    if (!s) return;
+    const css = [st.fg && `color:${st.fg}`, st.bg && `background:${st.bg}`, st.bold && "font-weight:700", st.dim && "opacity:.6",
+      st.italic && "font-style:italic", st.underline && "text-decoration:underline"].filter(Boolean).join(";");
+    out += css ? `<span style="${css}">${esc(s)}</span>` : esc(s);
+  };
+  while ((m = re.exec(text))) {
+    flush(text.slice(last, m.index)); last = re.lastIndex;
+    if (m[2] !== "m") continue;
+    const p = (m[1] || "0").split(/[;:]/).map(Number);
+    for (let i = 0; i < p.length; i++) {
+      const c = p[i];
+      if (c === 0) st = {};
+      else if (c === 1) st.bold = 1; else if (c === 2) st.dim = 1; else if (c === 3) st.italic = 1; else if (c === 4) st.underline = 1;
+      else if (c === 22) st.bold = st.dim = 0; else if (c === 23) st.italic = 0; else if (c === 24) st.underline = 0;
+      else if (c >= 30 && c <= 37) st.fg = BASE16[c - 30]; else if (c >= 90 && c <= 97) st.fg = BASE16[c - 82];
+      else if (c >= 40 && c <= 47) st.bg = BASE16[c - 40]; else if (c >= 100 && c <= 107) st.bg = BASE16[c - 92];
+      else if (c === 39) st.fg = null; else if (c === 49) st.bg = null;
+      else if (c === 38 || c === 48) {
+        const key = c === 38 ? "fg" : "bg";
+        if (p[i + 1] === 5) { st[key] = color256(p[i + 2]); i += 2; }
+        else if (p[i + 1] === 2) { st[key] = `rgb(${p[i + 2]},${p[i + 3]},${p[i + 4]})`; i += 4; }
+      }
+    }
+  }
+  flush(text.slice(last));
+  return out;
+}
+
+// ---- polling ----
+async function readPane() {
+  const id = state.selected, term = $("term");
+  if (!id || !term) return;
+  try {
+    const r = await api("pane.read", { pane_id: id, source: "visible", format: "ansi", strip_ansi: false });
+    if (id !== state.selected || !$("term")) return;
+    const t = $("term"), atBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 40;
+    t.innerHTML = ansiToHtml(r.read.text.replace(/\s+$/, ""));
+    if (atBottom) t.scrollTop = t.scrollHeight;
+  } catch (e) {}
+}
+async function loadSnapshot() {
+  try {
+    state.snap = (await api("session.snapshot")).snapshot;
+    state.offline = false;
+    const agents = state.snap.agents;
+    if (!agents.some(a => a.pane_id === state.selected)) {
+      const pick = agents.find(a => a.focused) || agents[0];
+      state.selected = pick ? pick.pane_id : null;
+    }
+  } catch (e) { state.offline = !state.fatal; }
+  render();
+}
+async function loadGit() {
+  if (!state.snap) return;
+  const jobs = [];
+  for (const w of state.snap.workspaces)
+    jobs.push(api("git.status", { workspace_id: w.workspace_id }).then(r => state.git["ws:" + w.workspace_id] = r.status, () => {}));
+  const seen = new Set();
+  for (const a of state.snap.agents) {
+    if (seen.has(folder(a))) continue; seen.add(folder(a));
+    jobs.push(api("git.status", { pane_id: a.pane_id }).then(r => state.git[folder(a)] = r.status, () => {}));
+  }
+  await Promise.all(jobs);
+  render();
+}
+const every = (ms, fn) => setInterval(() => { if (!document.hidden && !state.fatal) fn(); }, ms);
+every(2000, loadSnapshot);
+every(1000, readPane);
+every(15000, loadGit);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadSnapshot(); readPane(); } });
+
+// ---- input ----
+document.addEventListener("click", e => {
+  if (e.target.closest("#term")) { $("kbd").focus({ preventScroll: true }); return; }
+  const key = e.target.closest("[data-k]");
+  if (key) {
+    const kbd = $("kbd");
+    syncTyped(kbd);
+    if (key.dataset.k === "enter") { kbd.value = ""; typed = ""; }
+    // Agents draw their chat inside the app, so older messages come from the app's own
+    // Page Up/Down. The API has no names for those keys, so send their raw codes.
+    const RAW = { pageup: "\x1b[5~", pagedown: "\x1b[6~" };
+    if (RAW[key.dataset.k]) push("pane.send_text", { text: RAW[key.dataset.k] }); else keys(key.dataset.k);
+    setTimeout(readPane, 150);
+    return;
+  }
+  const el = e.target.closest("[data-toggle],[data-pane]");
+  if (!el) return;
+  if (el.dataset.pane) { state.selected = el.dataset.pane; state.side = false; }
+  else state.side = !state.side;
+  render();
+});
+// ---- typing: every keystroke goes straight to the pane, in order ----
+// Phone keyboards rarely report real keys, so diff the hidden textarea instead.
+let typed = "", queue = Promise.resolve();
+const push = (method, params) => { queue = queue.then(() => api(method, { pane_id: state.selected, ...params })).catch(() => {}); };
+const keys = (...k) => push("pane.send_keys", { keys: k });
+function syncTyped(el) {
+  const now = el.value;
+  let same = 0;
+  while (same < typed.length && same < now.length && typed[same] === now[same]) same++;
+  if (typed.length > same) keys(...Array(typed.length - same).fill("backspace"));
+  if (now.length > same) push("pane.send_text", { text: now.slice(same) });
+  typed = now;
+}
+const KEYS = { Escape: "esc", Tab: "tab", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+document.addEventListener("beforeinput", e => {
+  if (e.target.id !== "kbd") return;
+  if (e.inputType === "insertLineBreak" || e.inputType === "insertParagraph") {
+    e.preventDefault(); syncTyped(e.target); keys("enter");
+    e.target.value = ""; typed = "";
+    setTimeout(readPane, 200);
+  } else if (e.inputType === "deleteContentBackward" && !e.target.value) {
+    e.preventDefault(); keys("backspace");
+  }
+});
+document.addEventListener("input", e => { if (e.target.id === "kbd" && !e.isComposing) syncTyped(e.target); });
+document.addEventListener("compositionend", e => { if (e.target.id === "kbd") syncTyped(e.target); });
+document.addEventListener("pointerdown", e => { if (e.target.closest("[data-k]")) e.preventDefault(); });
+document.addEventListener("keydown", e => {
+  if (e.target.id !== "kbd" || !KEYS[e.key]) return;
+  e.preventDefault(); keys(KEYS[e.key]);
+});
+
+render();
+if (token) loadSnapshot().then(loadGit);
+</script>
+</body>
+</html>

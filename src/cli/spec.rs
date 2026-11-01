@@ -35,6 +35,7 @@ pub(super) fn command() -> Command {
         .subcommand(config_command())
         .subcommand(channel_command())
         .subcommand(machine::command())
+        .subcommand(mobile_command())
         .subcommand(server_command())
         .subcommand(api_command())
         .subcommand(workspace_command())
@@ -155,6 +156,13 @@ fn channel_command() -> Command {
                     .value_parser(["stable", "preview"]),
             ),
         )
+}
+
+fn mobile_command() -> Command {
+    Command::new("mobile")
+        .about("Open herdr on your phone: prints a link and QR code")
+        .arg(option("port", "PORT").help("Port to listen on (default 7781)"))
+        .arg(option("host", "IP").help("Address for the link, e.g. a Tailscale IP"))
 }
 
 fn server_command() -> Command {

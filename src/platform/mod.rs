@@ -261,6 +261,19 @@ pub(crate) fn apply_pane_runtime_marker(command: &mut portable_pty::CommandBuild
     apply_pane_runtime_marker_platform(command);
 }
 
+pub(crate) fn in_own_memory_scope(
+    command: portable_pty::CommandBuilder,
+) -> portable_pty::CommandBuilder {
+    in_own_memory_scope_platform(command)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn in_own_memory_scope_platform(
+    command: portable_pty::CommandBuilder,
+) -> portable_pty::CommandBuilder {
+    command
+}
+
 pub(crate) fn prepare_paste_text_for_pty(text: String) -> String {
     prepare_paste_text_for_pty_platform(text)
 }

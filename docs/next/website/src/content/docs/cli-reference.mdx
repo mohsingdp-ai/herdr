@@ -120,6 +120,14 @@ autoload -Uz compinit
 compinit
 ```
 
+## Phone
+
+```bash
+herdr mobile [--port PORT] [--host IP]
+```
+
+`herdr mobile` shares a phone page on your network and prints a link and QR code. Scan it on a phone on the same Wi-Fi, Tailscale, or VPN to see the sidebar, read any agent's pane, and type to it. The link holds a one-time secret; anyone who has it can type into your terminals, so use it only on networks you trust and press Ctrl+C to stop. Each run makes a new link. `--host` sets the address in the link, for example a Tailscale IP. The default port is 7781.
+
 ## Server
 
 ```bash
