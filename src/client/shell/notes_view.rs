@@ -1130,16 +1130,13 @@ impl ClientShellState {
             return;
         };
         let text = match view.note_selection() {
-            Some(selection) => selection,
+            // The agent cannot read `![[...]]`: give it each image's file instead.
+            Some(selection) => with_image_paths(&selection, |path| view.file_path(path)),
             None => {
                 let Some(file) = view.open.as_deref().and_then(|path| view.file_path(path)) else {
                     return;
                 };
-                if file.contains(char::is_whitespace) {
-                    format!("'{file}' ")
-                } else {
-                    format!("{file} ")
-                }
+                format!("{} ", quoted(&file))
             }
         };
         let Some(pane_id) = self
@@ -1892,6 +1889,38 @@ impl ClientShellState {
 /// Takes a fresh list from the server. The open note follows its file: a
 /// note being edited reloads when nothing was typed, and is marked as in
 /// conflict when something was.
+/// `file` in quotes when it has spaces, so a prompt reads it as one path.
+fn quoted(file: &str) -> String {
+    if file.contains(char::is_whitespace) {
+        format!("'{file}'")
+    } else {
+        file.to_owned()
+    }
+}
+
+/// `text` with each `![[image]]` embed swapped for that image's file on disk.
+/// Note embeds and anything unresolved stay as written.
+fn with_image_paths(text: &str, file_path: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("![[") {
+        let after = &rest[at + 3..];
+        let Some(end) = after.find("]]") else {
+            break;
+        };
+        let inner = &after[..end];
+        let target = inner[..inner.find(['|', '#']).unwrap_or(inner.len())].trim();
+        out.push_str(&rest[..at]);
+        match file_path(target).filter(|_| notes_markdown::is_image(target)) {
+            Some(file) => out.push_str(&quoted(&file)),
+            None => out.push_str(&rest[at..at + 3 + end + 2]),
+        }
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn apply_vault(view: &mut ClientNotesView, vault: NoteVault) {
     view.set_vault(vault);
     let Some(path) = view.open.clone() else {
@@ -1986,6 +2015,19 @@ mod tests {
             truncated: false,
         });
         view
+    }
+
+    #[test]
+    fn image_embeds_become_their_files_for_the_agent() {
+        let file = |path: &str| Some(format!("/vault/{path}"));
+        assert_eq!(
+            with_image_paths(
+                "see ![[attachments/Pasted image 1.png|300]] and ![[Plan]] ![[a.png]]",
+                file
+            ),
+            "see '/vault/attachments/Pasted image 1.png' and ![[Plan]] /vault/a.png"
+        );
+        assert_eq!(with_image_paths("open ![[x.png", file), "open ![[x.png");
     }
 
     #[test]
