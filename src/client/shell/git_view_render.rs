@@ -332,9 +332,25 @@ struct Styles {
     /// History rows: the selected commit, a commit not pushed anywhere, and its ↑ box.
     row_selected: Style,
     unpushed_row: Style,
+    /// Diff rows: added and removed lines get a faint green or red background.
+    added_row: Style,
+    removed_row: Style,
     pill: Style,
     /// Author initials badges, picked by a hash of the name.
     chips: [Style; 5],
+}
+
+const DIFF_TINT: f32 = 0.16;
+
+/// `base` on a background of `surface` blended toward `tint`, when both are RGB.
+fn tinted_row(base: Style, surface: Color, tint: Color, amount: f32) -> Option<Style> {
+    match (surface, tint) {
+        (Color::Rgb(r, g, b), Color::Rgb(tr, tg, tb)) => {
+            let (r, g, b) = crate::ui::mix_rgb((r, g, b), (tr, tg, tb), amount);
+            Some(base.bg(Color::Rgb(r, g, b)))
+        }
+        _ => None,
+    }
 }
 
 impl Styles {
@@ -363,13 +379,12 @@ impl Styles {
             yellow: Style::default().fg(p.yellow),
             mauve: Style::default().fg(p.mauve),
             row_selected: base.bg(p.surface0),
-            unpushed_row: match (p.surface_dim, p.green) {
-                (Color::Rgb(r, g, b), Color::Rgb(gr, gg, gb)) => {
-                    let (r, g, b) = crate::ui::mix_rgb((r, g, b), (gr, gg, gb), 0.12);
-                    base.bg(Color::Rgb(r, g, b))
-                }
-                _ => base,
-            },
+            unpushed_row: tinted_row(base, p.surface_dim, p.green, 0.12).unwrap_or(base),
+            // Without RGB colors there is nothing to blend, so fall back to colored text.
+            added_row: tinted_row(base, p.surface_dim, p.green, DIFF_TINT)
+                .unwrap_or_else(|| Style::default().fg(p.green)),
+            removed_row: tinted_row(base, p.surface_dim, p.red, DIFF_TINT)
+                .unwrap_or_else(|| Style::default().fg(p.red)),
             pill: base.bg(p.surface1),
             chips: [p.mauve, p.teal, p.peach, p.blue, p.yellow].map(|color| {
                 Style::default()
@@ -1143,12 +1158,15 @@ fn render_diff(
                 text,
                 ..
             } => {
-                let (sign, style) = match kind {
-                    GitDiffLineKind::Added => ("+", styles.green),
-                    GitDiffLineKind::Removed => ("-", styles.red),
-                    GitDiffLineKind::Context => (" ", styles.base),
-                    GitDiffLineKind::Marker => ("", styles.dim),
+                let style = match kind {
+                    GitDiffLineKind::Added => styles.added_row,
+                    GitDiffLineKind::Removed => styles.removed_row,
+                    GitDiffLineKind::Context => styles.base,
+                    GitDiffLineKind::Marker => styles.dim,
                 };
+                // Tint the whole row, wrapped continuations included; the
+                // background alone marks the line, so there is no +/- sign.
+                buffer.set_style(Rect::new(area.x, y, area.width.saturating_sub(1), 1), style);
                 if skip == 0 {
                     let number =
                         |value: &Option<u32>| value.map_or_else(String::new, |n| n.to_string());
@@ -1168,7 +1186,6 @@ fn render_diff(
                         &format!("{:>5}", number(new)),
                         styles.dim,
                     );
-                    put_text(buffer, area.x + 11, y, 1, sign, style);
                 }
                 let chunk = wrapped_chunk(text, usize::from(text_width), skip);
                 put_text(buffer, area.x + DIFF_GUTTER, y, text_width, chunk, style);
@@ -1728,6 +1745,14 @@ mod tests {
         assert_eq!(fit("checkpoint_picker.rs", 10), "checkpoin…");
         assert_eq!(fit("漢字かな", 5), "漢字…");
         assert_eq!(fit("abc", 0), "");
+    }
+
+    #[test]
+    fn diff_rows_are_tinted_only_with_rgb_colors() {
+        let base = Style::default().fg(Color::White);
+        let tinted = tinted_row(base, Color::Rgb(0, 0, 0), Color::Rgb(100, 200, 0), 0.5);
+        assert_eq!(tinted, Some(base.bg(Color::Rgb(50, 100, 0))));
+        assert_eq!(tinted_row(base, Color::Reset, Color::Green, 0.5), None);
     }
 
     #[test]

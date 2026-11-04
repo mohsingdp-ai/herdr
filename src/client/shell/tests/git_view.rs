@@ -227,6 +227,26 @@ fn opening_reads_the_focused_space_and_shows_its_changes_and_diff() {
         "{text}"
     );
     assert!(text.contains("− unstage hunk"), "{text}");
+
+    // Changed lines are marked by a tinted row, not a +/- sign.
+    let frame = state.compose(150, 34).expect("frame");
+    let width = frame.width as usize;
+    let row_of = |needle: &str| {
+        let index = text.lines().position(|line| line.contains(needle)).unwrap();
+        (index, text.lines().nth(index).unwrap().to_owned())
+    };
+    let (removed, removed_text) = row_of("old line");
+    let (added, added_text) = row_of("new line");
+    assert!(
+        !removed_text.contains("- ") && !added_text.contains("+ "),
+        "{text}"
+    );
+    let column = added_text[..added_text.find("new line").unwrap()]
+        .chars()
+        .count();
+    let bg = |row: usize| frame.cells[row * width + column].bg;
+    assert_ne!(bg(added), bg(removed));
+    assert_ne!(bg(added), frame.cells[(added + 1) * width + column].bg);
 }
 
 #[test]
