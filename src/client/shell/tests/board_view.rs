@@ -900,8 +900,8 @@ fn kanban_cards_carry_their_subtasks_and_pull_request() {
     assert!(text.contains("+1 more"), "{text}");
     assert!(text.contains("◫ 0/5"), "{text}");
     assert!(
-        text.contains("Implement the main payment"),
-        "the description shows: {text}"
+        !text.contains("Implement the main payment"),
+        "cards leave the description out: {text}"
     );
     assert!(text.contains("⎇ PR #42"), "{text}");
 

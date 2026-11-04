@@ -472,8 +472,6 @@ fn held(view: &ClientBoardView, id: &str) -> bool {
 const DRAFT_HEIGHT: u16 = 3;
 /// Subtasks listed on a card before "+N more".
 const CARD_SUBTASKS: usize = 4;
-/// Description rows on a card.
-const CARD_DESCRIPTION_ROWS: usize = 2;
 /// Columns between kanban columns.
 const COLUMN_GAP: u16 = 2;
 
@@ -493,26 +491,17 @@ fn priority_label(priority: &str) -> String {
     format!(" {icon} {name} ")
 }
 
-/// The description rows a card shows for `task` at `width`.
-fn card_description(task: &TaskSummary, width: u16) -> Vec<String> {
-    let Some(preview) = task.description_preview.as_deref() else {
-        return Vec::new();
-    };
-    let mut rows = wrap(preview, width);
-    if rows.len() > CARD_DESCRIPTION_ROWS {
-        let rest = rows[CARD_DESCRIPTION_ROWS - 1..].join(" ");
-        rows.truncate(CARD_DESCRIPTION_ROWS - 1);
-        rows.push(fit(&rest, width).into_owned());
-    }
-    rows
+/// The title rows a card shows for `task` at `width`, wrapped in full.
+fn card_title(task: &TaskSummary, width: u16) -> Vec<String> {
+    wrap(&task.title, width)
 }
 
-/// Rows a card takes: padding, header, title, description, meta, subtasks.
+/// Rows a card takes: padding, header, title, meta, subtasks.
 fn card_height(view: &ClientBoardView, task: &TaskSummary, width: u16) -> u16 {
     let inner = width.saturating_sub(4);
     let subtasks = view.subtasks(&task.id).len();
     let subtask_rows = subtasks.min(CARD_SUBTASKS) + usize::from(subtasks > CARD_SUBTASKS);
-    (5 + card_description(task, inner).len() + subtask_rows) as u16
+    (4 + card_title(task, inner).len() + subtask_rows) as u16
 }
 
 fn render_kanban(
@@ -735,21 +724,10 @@ fn render_card(
         }
         y += 1;
     }
-    if line(y) {
-        let title = if lifted { styles.dim } else { styles.bold };
-        put_text(
-            buffer,
-            inner.x,
-            y,
-            inner.width,
-            &fit(&task.title, inner.width),
-            on(title),
-        );
-        y += 1;
-    }
-    for row in card_description(task, inner.width) {
+    let title = if lifted { styles.dim } else { styles.bold };
+    for row in card_title(task, inner.width) {
         if line(y) {
-            put_text(buffer, inner.x, y, inner.width, &row, on(styles.dim));
+            put_text(buffer, inner.x, y, inner.width, &row, on(title));
         }
         y += 1;
     }
