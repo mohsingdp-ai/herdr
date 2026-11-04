@@ -458,3 +458,61 @@ fn clipboard_text_wins_over_an_image() {
         .and_then(|view| view.open_text())
         .is_some_and(|text| text.ends_with("words")));
 }
+
+#[test]
+fn only_the_selected_text_goes_to_the_agent() {
+    let pasted = |outcome: &ClientShellInput| -> Vec<String> {
+        outcome
+            .requests
+            .iter()
+            .filter_map(|request| match request {
+                ClientMessage::ClientShellPaneInput { events, .. } => Some(events),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|event| match event {
+                ClientPaneInputEvent::Paste(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut state = opened(sample());
+    screen(&mut state, 160, 40);
+    key(&mut state, KeyCode::Enter, KeyModifiers::empty());
+    // Nothing selected: ctrl+g sends nothing and the button sends the path.
+    assert!(pasted(&key(&mut state, KeyCode::Char('g'), KeyModifiers::CONTROL)).is_empty());
+    assert!(!screen(&mut state, 160, 40).contains("→ Agent: selection"));
+
+    // The cursor sits at the note's end; select its last line.
+    key(&mut state, KeyCode::Home, KeyModifiers::SHIFT);
+    assert!(screen(&mut state, 160, 40).contains("→ Agent: selection"));
+    let sent = key(&mut state, KeyCode::Char('g'), KeyModifiers::CONTROL);
+    assert_eq!(pasted(&sent), ["see [[Plan]] and @src/ui.rs"]);
+    assert!(state.notes_view.is_none(), "it goes to the agent");
+}
+
+#[test]
+fn the_agent_button_sends_a_selection_or_the_note_path() {
+    let mut state = opened(sample());
+    screen(&mut state, 160, 40);
+    key(&mut state, KeyCode::Enter, KeyModifiers::empty());
+    key(&mut state, KeyCode::Home, KeyModifiers::SHIFT);
+    screen(&mut state, 160, 40);
+    let button = target(&state, &NotesTarget::ToAgent);
+    let sent = click(&mut state, button);
+    assert!(sent.requests.iter().any(|request| matches!(
+        request,
+        ClientMessage::ClientShellPaneInput { events, .. }
+            if matches!(&events[..], [ClientPaneInputEvent::Paste(text)] if text == "see [[Plan]] and @src/ui.rs")
+    )));
+
+    let mut state = opened(sample());
+    screen(&mut state, 160, 40);
+    let button = target(&state, &NotesTarget::ToAgent);
+    let sent = click(&mut state, button);
+    assert!(sent.requests.iter().any(|request| matches!(
+        request,
+        ClientMessage::ClientShellPaneInput { events, .. }
+            if matches!(&events[..], [ClientPaneInputEvent::Paste(text)] if text.ends_with("scratch.md "))
+    )));
+}

@@ -891,7 +891,15 @@ fn render_title(
     let buttons = [
         (delete.0, NotesTarget::Delete, delete.1),
         (" Rename ", NotesTarget::Rename, styles.button),
-        (" → Agent ", NotesTarget::ToAgent, styles.button),
+        (
+            if view.note_selection().is_some() {
+                " → Agent: selection "
+            } else {
+                " → Agent "
+            },
+            NotesTarget::ToAgent,
+            styles.button,
+        ),
         (
             " Edit ",
             NotesTarget::Edit,
@@ -1090,8 +1098,12 @@ fn render_hint(
             "↑↓ choose · ↵ open · #tag filters · esc close",
             styles.dim,
         ),
+        None if view.note_selection().is_some() => (
+            "ctrl+g send selection to agent · esc done · ctrl+s save · ctrl+z undo",
+            styles.dim,
+        ),
         None if view.editor.is_some() => (
-            "esc done · ctrl+s save · ctrl+z undo · ctrl+o find · ctrl+n new",
+            "esc done · ctrl+s save · ctrl+z undo · ctrl+o find · ctrl+n new · select text to send it",
             styles.dim,
         ),
         None => (

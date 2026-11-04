@@ -328,6 +328,14 @@ impl ClientNotesView {
             .map(|note| note.content.clone())
     }
 
+    /// Text selected in the note being edited, if any.
+    pub(super) fn note_selection(&self) -> Option<String> {
+        self.editor
+            .as_ref()
+            .and_then(NoteEditor::selected_text)
+            .filter(|text| !text.trim().is_empty())
+    }
+
     pub(super) fn dirty(&self) -> bool {
         self.editor
             .as_ref()
@@ -1113,28 +1121,37 @@ impl ClientShellState {
         self.send_notes_request(method, generation, NotesRequest::Attach { note }, outcome);
     }
 
-    /// Types the open note's file path into the space's focused pane, usually
-    /// an agent's prompt, and goes there.
+    /// Types into the space's focused pane, usually an agent's prompt, and
+    /// goes there: the text selected in the note when there is some, else
+    /// the open note's file path.
     pub(super) fn send_note_to_agent(&mut self, outcome: &mut ClientShellInput) {
         self.flush_note(outcome);
-        let Some(file) = self
-            .notes_view
-            .as_ref()
-            .and_then(|view| view.open.as_deref().and_then(|path| view.file_path(path)))
-        else {
+        let Some(view) = self.notes_view.as_ref() else {
             return;
+        };
+        let text = match view.note_selection() {
+            Some(selection) => selection,
+            None => {
+                let Some(file) = view.open.as_deref().and_then(|path| view.file_path(path)) else {
+                    return;
+                };
+                if file.contains(char::is_whitespace) {
+                    format!("'{file}' ")
+                } else {
+                    format!("{file} ")
+                }
+            }
         };
         let Some(pane_id) = self
             .snapshot
             .as_deref()
             .and_then(|snapshot| snapshot.focused_pane_id.clone())
         else {
+            if let Some(view) = self.notes_view.as_mut() {
+                view.message = Some("no pane to send to: open an agent in this space".to_owned());
+                outcome.repaint = true;
+            }
             return;
-        };
-        let text = if file.contains(char::is_whitespace) {
-            format!("'{file}' ")
-        } else {
-            format!("{file} ")
         };
         self.close_notes_view(outcome);
         super::push_target_event(
@@ -1293,6 +1310,10 @@ impl ClientShellState {
                 }
                 KeyCode::Char('s') => {
                     self.flush_note(outcome);
+                    return;
+                }
+                KeyCode::Char('g') if view.note_selection().is_some() => {
+                    self.send_note_to_agent(outcome);
                     return;
                 }
                 _ => {}
