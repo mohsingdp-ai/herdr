@@ -5,8 +5,8 @@
 use ratatui::style::Color;
 
 use super::git_view::{
-    base_name, ClientGitView, GitArmed, GitDiffLineKind, GitDiffRow, GitDiffSource, GitTone,
-    GitViewFocus, GitViewHits, GitViewTab, GitViewTarget,
+    base_name, ClientGitView, GitArmed, GitDiffLineKind, GitDiffRow, GitDiffSource, GitSidebar,
+    GitTone, GitViewFocus, GitViewHits, GitViewTab, GitViewTarget,
 };
 use super::render::{display_width, put_right_text, put_segment, put_text};
 use super::*;
@@ -17,6 +17,9 @@ const DIFF_GUTTER: u16 = 12;
 const COMMIT_BOX_HEIGHT: u16 = 5;
 const MIN_WIDTH: u16 = 50;
 const MIN_HEIGHT: u16 = 13;
+/// The narrowest the sidebar goes, and the least it leaves for the diff.
+const MIN_SIDEBAR: u16 = 24;
+const MIN_DIFF: u16 = 24;
 /// Rows of a commit message body shown before "… more".
 const BODY_PREVIEW_ROWS: usize = 2;
 /// Rows a message (a git error can run long) may take above the hint row.
@@ -28,6 +31,7 @@ pub(super) struct GitViewGeometry {
     pub(super) too_small: bool,
     header: Rect,
     left: Rect,
+    pub(super) sidebar_hidden: bool,
     divider_x: u16,
     right: Rect,
     tabs: Rect,
@@ -43,12 +47,13 @@ pub(super) struct GitViewGeometry {
 }
 
 impl GitViewGeometry {
-    pub(super) fn new(area: Rect, view: &ClientGitView) -> Self {
+    pub(super) fn new(area: Rect, view: &ClientGitView, sidebar: GitSidebar) -> Self {
         let mut geometry = Self {
             too_small: area.width < MIN_WIDTH || area.height < MIN_HEIGHT,
             // One blank row above the header keeps it off the tab bar.
             header: Rect::new(area.x, area.y + u16::from(area.height > 1), area.width, 1),
             left: Rect::default(),
+            sidebar_hidden: sidebar.hidden,
             divider_x: 0,
             right: Rect::default(),
             tabs: Rect::default(),
@@ -66,13 +71,22 @@ impl GitViewGeometry {
             return geometry;
         }
         let body = Rect::new(area.x, area.y + 3, area.width, area.height - 3);
-        let left_width = percent(area.width, 36).clamp(34, 60).min(area.width - 24);
+        let max_left = area.width - MIN_DIFF;
+        let left_width = match sidebar {
+            GitSidebar { hidden: true, .. } => 0,
+            GitSidebar {
+                width: Some(width), ..
+            } => width.clamp(MIN_SIDEBAR, max_left),
+            GitSidebar { width: None, .. } => percent(area.width, 36).clamp(34, 60).min(max_left),
+        };
         geometry.left = Rect::new(body.x, body.y, left_width, body.height);
         geometry.divider_x = body.x + left_width;
+        // Hidden, the diff side starts at the edge: no divider column.
+        let right_x = geometry.divider_x + u16::from(!sidebar.hidden);
         geometry.right = Rect::new(
-            geometry.divider_x + 1,
+            right_x,
             body.y,
-            area.right().saturating_sub(geometry.divider_x + 1),
+            area.right().saturating_sub(right_x),
             body.height,
         );
         let left = geometry.left;
@@ -144,6 +158,14 @@ impl GitViewGeometry {
             }
         }
         geometry
+    }
+
+    /// The draggable column between the sidebar and the diff.
+    pub(super) fn divider(&self) -> Rect {
+        if self.too_small || self.sidebar_hidden {
+            return Rect::default();
+        }
+        Rect::new(self.divider_x, self.left.y, 1, self.left.height)
     }
 
     /// Columns of diff text: the diff area less its gutter and scrollbar.
@@ -276,8 +298,8 @@ fn clamp_scroll(scroll: &mut usize, rows: usize, viewport: u16, reveal: Option<(
 impl ClientGitView {
     /// Fits scrolling to this frame's geometry and lays out the diff, before
     /// the pure drawing pass.
-    pub(super) fn prepare_frame(&mut self, area: Rect) {
-        let geometry = GitViewGeometry::new(area, self);
+    pub(super) fn prepare_frame(&mut self, area: Rect, sidebar: GitSidebar) {
+        let geometry = GitViewGeometry::new(area, self, sidebar);
         if geometry.too_small {
             return;
         }
@@ -415,6 +437,7 @@ pub(super) fn render_git_view(
     buffer: &mut Buffer,
     area: Rect,
     view: &ClientGitView,
+    sidebar: GitSidebar,
     space_label: &str,
     palette: &Palette,
 ) -> GitViewFrame {
@@ -432,7 +455,7 @@ pub(super) fn render_git_view(
         },
         cursor: None,
     };
-    let geometry = GitViewGeometry::new(area, view);
+    let geometry = GitViewGeometry::new(area, view, sidebar);
     render_header(
         buffer,
         &geometry,
@@ -454,14 +477,19 @@ pub(super) fn render_git_view(
     }
     let rule = "─".repeat(usize::from(area.width));
     put_text(buffer, area.x, area.y + 2, area.width, &rule, styles.rule);
-    for y in geometry.left.y..geometry.left.bottom() {
-        put_text(buffer, geometry.divider_x, y, 1, "│", styles.rule);
+    let divider = geometry.divider();
+    for y in divider.y..divider.bottom() {
+        put_text(buffer, divider.x, y, 1, "│", styles.rule);
     }
     frame.hits.list = geometry.list;
     frame.hits.files = geometry.files;
     frame.hits.diff = geometry.diff;
+    frame.hits.divider = divider;
 
-    render_tabs(buffer, &geometry, view, &styles, &mut frame.hits);
+    let shown = !sidebar.hidden;
+    if shown {
+        render_tabs(buffer, &geometry, view, &styles, &mut frame.hits);
+    }
     if view.unsupported {
         put_text(
             buffer,
@@ -475,12 +503,16 @@ pub(super) fn render_git_view(
     }
     match view.tab {
         GitViewTab::Changes => {
-            render_changes_list(buffer, &geometry, view, &styles, &mut frame.hits);
-            frame.cursor = render_commit_box(buffer, &geometry, view, &styles, &mut frame.hits);
+            if shown {
+                render_changes_list(buffer, &geometry, view, &styles, &mut frame.hits);
+                frame.cursor = render_commit_box(buffer, &geometry, view, &styles, &mut frame.hits);
+            }
             render_changes_diff(buffer, &geometry, view, &styles, palette, &mut frame.hits);
         }
         GitViewTab::History => {
-            render_history_list(buffer, &geometry, view, &styles, &mut frame.hits);
+            if shown {
+                render_history_list(buffer, &geometry, view, &styles, &mut frame.hits);
+            }
             render_commit(buffer, &geometry, view, &styles, palette, &mut frame.hits);
         }
     }
@@ -1688,14 +1720,16 @@ fn render_hint(
     // The longest hint that fits.
     let hints: &[&str] = match view.tab {
         GitViewTab::Changes => &[
+            "↑↓ file · space stage · a all · d discard · c commit · p push · l pull · b sidebar · < > resize · tab history · esc close",
             "↑↓ file · space stage · a all · d discard · c commit · p push · l pull · tab history · esc close",
             "space stage · d discard · c commit · p push · l pull · tab history · esc",
-            "space stage · c commit · tab history · esc",
+            "space stage · c commit · b sidebar · esc",
         ],
         GitViewTab::History => &[
+            "↑↓ commit · [ ] file · pgup/pgdn scroll · p push · l pull · b sidebar · < > resize · tab changes · esc close",
             "↑↓ commit · [ ] file · pgup/pgdn scroll · p push · l pull · tab changes · esc close",
             "↑↓ commit · [ ] file · p push · l pull · tab changes · esc",
-            "[ ] file · tab changes · esc",
+            "[ ] file · b sidebar · esc",
         ],
     };
     let room = row.width.saturating_sub(2);

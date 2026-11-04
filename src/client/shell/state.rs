@@ -205,6 +205,8 @@ pub(super) struct ClientTabPress {
 
 pub(super) enum ClientChromeDrag {
     SidebarWidth,
+    /// The git view's divider between its file list and the diff.
+    GitSidebar,
     SidebarSection,
     WorkspaceScrollbar {
         grab_row_offset: u16,
@@ -986,6 +988,7 @@ pub(crate) struct ClientShellState {
     /// The git view, shown in place of the focused space's panes.
     pub(super) git_view: Option<super::git_view::ClientGitView>,
     pub(super) git_view_generation: u64,
+    pub(super) git_sidebar: super::git_view::GitSidebar,
     /// The Board, shown in place of the focused space's panes.
     pub(super) board_view: Option<super::board_view::ClientBoardView>,
     pub(super) board_view_generation: u64,
@@ -1188,6 +1191,7 @@ impl ClientShellState {
             overlay,
             git_view: None,
             git_view_generation: 0,
+            git_sidebar: Default::default(),
             board_view: None,
             board_view_generation: 0,
             board_view_needs_load: false,

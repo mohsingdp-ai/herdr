@@ -29,7 +29,9 @@ impl ClientShellState {
             crate::protocol::PaneSurfaceSplitDirection::Vertical => "row-resize",
         };
         match &self.chrome_drag {
-            Some(ClientChromeDrag::SidebarWidth) => return "col-resize",
+            Some(ClientChromeDrag::SidebarWidth | ClientChromeDrag::GitSidebar) => {
+                return "col-resize"
+            }
             Some(ClientChromeDrag::SidebarSection) => return "row-resize",
             Some(ClientChromeDrag::PaneSplit { hit, .. }) => return split(hit.direction),
             Some(_) => return "",
@@ -39,7 +41,7 @@ impl ClientShellState {
             return "";
         }
         let over = |rect: Rect| super::contains(rect, point);
-        if over(self.hits.sidebar_divider) {
+        if over(self.hits.sidebar_divider) || over(self.hits.git_view.divider) {
             "col-resize"
         } else if over(self.hits.sidebar_section_divider) {
             "row-resize"
@@ -1103,6 +1105,10 @@ impl ClientShellState {
                     self.set_sidebar_section_from_row(mouse.row, outcome);
                     return;
                 }
+                Some(ClientChromeDrag::GitSidebar) => {
+                    self.drag_git_sidebar(mouse.column, outcome);
+                    return;
+                }
                 Some(ClientChromeDrag::WorkspaceScrollbar { grab_row_offset }) => {
                     if let Some(metrics) = self.hits.workspace_scroll_metrics {
                         let offset = crate::ui::scrollbar_offset_from_drag_row(
@@ -1433,7 +1439,8 @@ impl ClientShellState {
                     ClientChromeDrag::SidebarWidth | ClientChromeDrag::SidebarSection => {
                         self.persist_chrome_preferences(outcome);
                     }
-                    ClientChromeDrag::WorkspaceScrollbar { .. }
+                    ClientChromeDrag::GitSidebar
+                    | ClientChromeDrag::WorkspaceScrollbar { .. }
                     | ClientChromeDrag::AgentScrollbar { .. }
                     | ClientChromeDrag::HelpScrollbar { .. }
                     | ClientChromeDrag::NavigatorScrollbar { .. }

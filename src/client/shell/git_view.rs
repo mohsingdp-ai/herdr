@@ -47,6 +47,18 @@ pub(super) enum GitDiffSource {
     },
 }
 
+/// The left column's width and whether it shows. Kept on the shell, not the
+/// view, so it survives closing the view and moving between spaces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct GitSidebar {
+    /// Columns chosen by the user; none means the default share of the width.
+    pub(super) width: Option<u16>,
+    pub(super) hidden: bool,
+}
+
+/// Columns one `<` or `>` press moves the sidebar edge.
+const SIDEBAR_STEP: u16 = 4;
+
 /// A discard waits for a second press or click on the same target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum GitArmed {
@@ -1410,13 +1422,44 @@ impl ClientShellState {
             KeyCode::Char('c') | KeyCode::Enter if !history => {
                 view.focus = GitViewFocus::Summary;
                 view.armed = None;
+                // The commit fields live in the sidebar.
+                self.git_sidebar.hidden = false;
                 outcome.repaint = true;
             }
+            KeyCode::Char('b') => {
+                self.git_sidebar.hidden = !self.git_sidebar.hidden;
+                outcome.repaint = true;
+            }
+            KeyCode::Char('<') => self.resize_git_sidebar(-(SIDEBAR_STEP as i32), outcome),
+            KeyCode::Char('>') => self.resize_git_sidebar(SIDEBAR_STEP as i32, outcome),
             KeyCode::Char('u') if view.undo.is_some() => self.undo_git_commit(outcome),
             KeyCode::Char('p') => self.push_git_branch(outcome),
             KeyCode::Char('l') => self.pull_git_branch(outcome),
             KeyCode::Char('r') => self.refresh_git_view(outcome),
             _ => {}
+        }
+    }
+
+    /// Moves the sidebar edge by `delta` columns from where it is now, showing
+    /// the sidebar if it was hidden.
+    fn resize_git_sidebar(&mut self, delta: i32, outcome: &mut ClientShellInput) {
+        let hits = &self.hits.git_view;
+        let current = hits.divider.x.saturating_sub(hits.area.x);
+        if self.git_sidebar.hidden || hits.divider.width == 0 {
+            self.git_sidebar.hidden = false;
+        } else {
+            let width = (i32::from(current) + delta).clamp(0, i32::from(u16::MAX));
+            self.git_sidebar.width = Some(width as u16);
+        }
+        outcome.repaint = true;
+    }
+
+    /// Sets the sidebar edge to `column` while its divider is dragged.
+    pub(super) fn drag_git_sidebar(&mut self, column: u16, outcome: &mut ClientShellInput) {
+        let width = column.saturating_sub(self.hits.git_view.area.x);
+        if self.git_sidebar.width != Some(width) {
+            self.git_sidebar.width = Some(width);
+            outcome.repaint = true;
         }
     }
 
@@ -1501,6 +1544,9 @@ impl ClientShellState {
                     }
                     outcome.repaint = true;
                 }
+            }
+            MouseEventKind::Down(MouseButton::Left) if super::contains(hits.divider, point) => {
+                self.chrome_drag = Some(ClientChromeDrag::GitSidebar);
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 let target = hits
@@ -1776,6 +1822,8 @@ pub(super) struct GitViewHits {
     pub(super) list: Rect,
     pub(super) files: Rect,
     pub(super) diff: Rect,
+    /// The column between the sidebar and the diff; empty while hidden.
+    pub(super) divider: Rect,
     pub(super) targets: Vec<(Rect, GitViewTarget)>,
 }
 

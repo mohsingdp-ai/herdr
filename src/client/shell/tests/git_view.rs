@@ -938,3 +938,52 @@ fn agents_carry_their_folders_git_state_and_hovering_makes_it_a_git_button() {
     mouse(&mut state, row.x + 1, row.y, MouseEventKind::Moved);
     assert!(!line(&mut state, row.y).contains('⎇'));
 }
+
+#[test]
+fn the_sidebar_resizes_by_key_and_drag_and_hides() {
+    let (mut state, _) = loaded_view();
+    screen(&mut state);
+    let key = |state: &mut ClientShellState, text: &str| {
+        state.handle_raw_events(vec![RawInputEvent::Text(crate::input::TextCommit::new(
+            text.to_owned(),
+        ))]);
+        screen(state);
+    };
+    let divider = |state: &ClientShellState| state.hits.git_view.divider;
+    let start = divider(&state).x;
+    assert!(divider(&state).width > 0);
+
+    key(&mut state, ">");
+    assert_eq!(divider(&state).x, start + 4);
+    key(&mut state, "<");
+    key(&mut state, "<");
+    assert_eq!(divider(&state).x, start - 4);
+
+    // Drag the divider to a column; the edge follows the mouse.
+    let at = divider(&state);
+    let mouse = |kind, column| {
+        RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column,
+            row: at.y + 2,
+            modifiers: KeyModifiers::empty(),
+        })
+    };
+    state.handle_raw_events(vec![
+        mouse(MouseEventKind::Down(MouseButton::Left), at.x),
+        mouse(MouseEventKind::Drag(MouseButton::Left), at.x + 10),
+        mouse(MouseEventKind::Up(MouseButton::Left), at.x + 10),
+    ]);
+    screen(&mut state);
+    assert_eq!(divider(&state).x, at.x + 10);
+
+    // Hidden, the diff takes the whole width and the list is gone.
+    key(&mut state, "b");
+    assert_eq!(divider(&state), Rect::default());
+    assert_eq!(state.hits.git_view.diff.x, state.hits.git_view.area.x);
+    assert!(!screen(&mut state).contains("changed files"));
+
+    // Starting a commit brings the sidebar back, at the width it had.
+    key(&mut state, "c");
+    assert_eq!(divider(&state).x, at.x + 10);
+}
