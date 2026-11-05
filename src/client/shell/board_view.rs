@@ -17,6 +17,9 @@ const STAMP_INTERVAL: Duration = Duration::from_secs(2);
 /// Priority filter choices after "all".
 pub(super) const PRIORITIES: [&str; 3] = ["high", "medium", "low"];
 
+/// Task types the details' Type picker steps through; each has its own color.
+pub(super) const TYPES: [&str; 6] = ["feature", "bug", "enhancement", "docs", "spike", "chore"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum BoardMode {
     Kanban,
@@ -40,7 +43,7 @@ pub(super) enum BoardSortKey {
     Id,
     Title,
     Priority,
-    Agent,
+    Created,
     Deps,
 }
 
@@ -75,6 +78,10 @@ pub(super) enum BoardRequest {
         id: String,
         before: Box<TaskSnapshot>,
     },
+    /// Moving a task to the archive; answered with the new list.
+    Archive {
+        id: String,
+    },
 }
 
 /// A task as shown before an edit, to put back if the save fails.
@@ -90,7 +97,6 @@ pub(super) enum BoardField {
     Title,
     Description,
     Assignee,
-    Type,
     Comment,
 }
 
@@ -166,6 +172,8 @@ pub(super) struct ClientBoardView {
     pub(super) editing: Option<BoardEditing>,
     /// Tasks with an edit on its way; the next waits for its new fingerprint.
     pub(super) saving: HashSet<String>,
+    /// The task whose Archive was clicked once: the next click archives it.
+    pub(super) archive_armed: Option<String>,
     /// The list should be read again.
     list_stale: bool,
     stamp_in_flight: bool,
@@ -188,8 +196,6 @@ pub(super) enum BoardRow<'a> {
     Subtask { task: &'a TaskSummary, last: bool },
     /// The new task being named in this group.
     Draft,
-    /// A group with no tasks.
-    Empty,
     /// Space between groups.
     Gap,
 }
@@ -223,6 +229,7 @@ impl ClientBoardView {
             reveal_selection: false,
             init_busy: false,
             message: None,
+            archive_armed: None,
             column_scroll: HashMap::new(),
             drag: None,
             pending_moves: HashMap::new(),
@@ -379,12 +386,12 @@ impl ClientBoardView {
                 BoardSortKey::Priority => {
                     priority_rank(a.priority.as_deref()).cmp(&priority_rank(b.priority.as_deref()))
                 }
-                // Unassigned sorts last, as "~" does after names.
-                BoardSortKey::Agent => a
-                    .assignees
-                    .first()
-                    .map_or("~", String::as_str)
-                    .cmp(b.assignees.first().map_or("~", String::as_str)),
+                // ISO dates sort as text; undated sorts last, as "~" does.
+                BoardSortKey::Created => a
+                    .created_at
+                    .as_deref()
+                    .unwrap_or("~")
+                    .cmp(b.created_at.as_deref().unwrap_or("~")),
                 BoardSortKey::Deps => a.dependencies.len().cmp(&b.dependencies.len()),
             };
             if self.sort_ascending {
@@ -402,7 +409,14 @@ impl ClientBoardView {
         for status in self.shown_statuses() {
             let tasks = self.column(status);
             let folded = self.collapsed.contains(status);
-            if !rows.is_empty() {
+            let drafting = self
+                .draft
+                .as_ref()
+                .is_some_and(|draft| draft.status == status);
+            // Header-only groups (empty or folded) stack without a gap.
+            let bare = folded || (tasks.is_empty() && !drafting);
+            let after_bare = matches!(rows.last(), Some(BoardRow::Group { .. }));
+            if !rows.is_empty() && !(bare && after_bare) {
                 rows.push(BoardRow::Gap);
             }
             rows.push(BoardRow::Group {
@@ -413,14 +427,8 @@ impl ClientBoardView {
             if folded {
                 continue;
             }
-            let drafting = self
-                .draft
-                .as_ref()
-                .is_some_and(|draft| draft.status == status);
             if drafting {
                 rows.push(BoardRow::Draft);
-            } else if tasks.is_empty() {
-                rows.push(BoardRow::Empty);
             }
             for task in tasks {
                 rows.push(BoardRow::Task(task));
@@ -854,12 +862,46 @@ impl ClientShellState {
         self.send_board_request(method, generation, BoardRequest::Init, outcome);
     }
 
+    /// The details' Archive: arms on the first click, archives on the second.
+    fn archive_board_task(&mut self, outcome: &mut ClientShellInput) {
+        let Some(view) = self.board_view.as_mut() else {
+            return;
+        };
+        let Some(id) = view.selected.clone() else {
+            return;
+        };
+        outcome.repaint = true;
+        if view.is_busy(&id) {
+            return;
+        }
+        if view.archive_armed.as_ref() != Some(&id) {
+            view.archive_armed = Some(id);
+            return;
+        }
+        view.archive_armed = None;
+        view.message = None;
+        view.saving.insert(id.clone());
+        let generation = view.generation;
+        let method = Method::TaskArchive(crate::api::schema::TaskGetParams {
+            workspace_id: Some(view.workspace_id.clone()),
+            pane_id: None,
+            id: id.clone(),
+        });
+        let request = BoardRequest::Archive { id: id.clone() };
+        if !self.send_board_request(method, generation, request, outcome) {
+            if let Some(view) = self.board_view.as_mut() {
+                view.saving.remove(&id);
+            }
+        }
+    }
+
     pub(super) fn select_board_task(&mut self, id: String, outcome: &mut ClientShellInput) {
         let Some(view) = self.board_view.as_mut() else {
             return;
         };
         if view.selected.as_ref() != Some(&id) {
             view.details_scroll = 0;
+            view.archive_armed = None;
         }
         view.selected = Some(id);
         view.details_open = true;
@@ -1097,7 +1139,6 @@ impl ClientShellState {
         let text = match field {
             BoardField::Title => task.title.clone(),
             BoardField::Assignee => task.assignees.join(", "),
-            BoardField::Type => task.task_type.clone().unwrap_or_default(),
             BoardField::Comment => String::new(),
             BoardField::Description => {
                 let Some(detail) = view.shown_detail() else {
@@ -1198,15 +1239,6 @@ impl ClientShellState {
                         outcome,
                     );
                 }
-            }
-            BoardField::Type if !text.is_empty() && Some(&text) != task.task_type.as_ref() => {
-                let value = text.clone();
-                self.edit_board_task(
-                    &id,
-                    |params| params.task_type = Some(value),
-                    move |summary, _| summary.task_type = Some(text),
-                    outcome,
-                );
             }
             BoardField::Comment if !text.is_empty() => {
                 let author = comment_author();
@@ -1456,6 +1488,7 @@ impl ClientShellState {
             BoardTarget::OpenUrl(url) => {
                 outcome.actions.push(ClientShellAction::OpenSafeWebUrl(url));
             }
+            BoardTarget::Archive => self.archive_board_task(outcome),
             BoardTarget::FocusPane(pane_id) => {
                 self.close_board_view(outcome);
                 self.push_endpoint_method(
@@ -1504,6 +1537,26 @@ impl ClientShellState {
                         &id,
                         |params| params.priority = Some(value),
                         move |summary, _| summary.priority = Some(priority),
+                        outcome,
+                    );
+                }
+            }
+            BoardTarget::CycleType => {
+                let next = self.board_view.as_ref().and_then(|view| {
+                    let task = view.selected_task()?;
+                    let index = task
+                        .task_type
+                        .as_deref()
+                        .and_then(|kind| TYPES.iter().position(|t| t.eq_ignore_ascii_case(kind)));
+                    let next = TYPES[index.map_or(0, |index| (index + 1) % TYPES.len())];
+                    Some((task.id.clone(), next.to_owned()))
+                });
+                if let Some((id, kind)) = next {
+                    let value = kind.clone();
+                    self.edit_board_task(
+                        &id,
+                        |params| params.task_type = Some(value),
+                        move |summary, _| summary.task_type = Some(kind),
                         outcome,
                     );
                 }
@@ -1581,7 +1634,11 @@ impl ClientShellState {
                             view.folded_tasks.insert(id);
                         }
                     }
-                    BoardTarget::CloseDetails => view.details_open = false,
+                    BoardTarget::CloseDetails => {
+                        view.details_open = false;
+                        view.archive_armed = None;
+                    }
+                    BoardTarget::CancelArchive => view.archive_armed = None,
                     _ => {}
                 }
                 outcome.repaint = true;
@@ -1653,11 +1710,13 @@ impl ClientShellState {
             return (false, Vec::new());
         };
         match request {
-            BoardRequest::List | BoardRequest::Init => {
-                if matches!(request, BoardRequest::List) {
-                    view.list_in_flight = false;
-                } else {
-                    view.init_busy = false;
+            BoardRequest::List | BoardRequest::Init | BoardRequest::Archive { .. } => {
+                match &request {
+                    BoardRequest::List => view.list_in_flight = false,
+                    BoardRequest::Archive { id } => {
+                        view.saving.remove(id);
+                    }
+                    _ => view.init_busy = false,
                 }
                 match result {
                     Ok(ResponseResult::TaskList { board }) => {
@@ -1697,6 +1756,9 @@ impl ClientShellState {
                         // The list itself still shows; only the button failed.
                         _ if matches!(request, BoardRequest::Init) => {
                             view.message = Some(error.message);
+                        }
+                        _ if matches!(request, BoardRequest::Archive { .. }) => {
+                            view.message = Some(format!("not archived: {}", error.message));
                         }
                         _ => view.load = BoardLoad::Failed(error.message),
                     },
@@ -1811,6 +1873,8 @@ pub(super) enum BoardTarget {
     CycleStatus,
     /// The details' priority: a click sets the next one.
     CyclePriority,
+    /// The details' type: a click sets the next one of [`TYPES`].
+    CycleType,
     /// An acceptance criterion, by its 1-based index: a click ticks or unticks it.
     ToggleAc(u32),
     /// A parent's ▾/▸ in the list: shows or hides its subtasks.
@@ -1821,6 +1885,10 @@ pub(super) enum BoardTarget {
     OpenUrl(String),
     /// The dot of the agent working on a task: a click goes to its pane.
     FocusPane(String),
+    /// The details' Archive: the first click asks, the second archives.
+    Archive,
+    /// Takes back an Archive click.
+    CancelArchive,
     CloseDetails,
     /// Takes a click so nothing under it does.
     Nothing,
@@ -1858,6 +1926,7 @@ mod tests {
             description_preview: None,
             acceptance_criteria_checked: 0,
             acceptance_criteria_total: 0,
+            created_at: None,
             pane_id: None,
             fingerprint: id.into(),
         }
@@ -1885,7 +1954,6 @@ mod tests {
                 BoardRow::Task(task) => task.id.clone(),
                 BoardRow::Subtask { task, .. } => format!("  {}", task.id),
                 BoardRow::Draft => "draft".into(),
-                BoardRow::Empty => "empty".into(),
                 BoardRow::Gap => "-".into(),
             })
             .collect()
@@ -1902,7 +1970,6 @@ mod tests {
                 "T-10",
                 "-",
                 "[Doing 0]",
-                "empty",
                 "-",
                 "[Done 1]",
                 "T-3"
@@ -1913,18 +1980,16 @@ mod tests {
         view.collapsed.insert("Done".into());
         assert_eq!(
             ids(&view.list_rows()),
-            [
-                "[To Do 2]",
-                "T-10",
-                "T-2",
-                "-",
-                "[Doing 0]",
-                "empty",
-                "-",
-                "[Done 1]"
-            ]
+            ["[To Do 2]", "T-10", "T-2", "-", "[Doing 0]", "[Done 1]"]
         );
         assert_eq!(view.open_count(), 2);
+        // Created sorts by date, undated last.
+        if let Some(board) = view.board.as_mut() {
+            board.tasks[1].created_at = Some("2026-11-02T09:00:00Z".into());
+        }
+        view.sort = BoardSortKey::Created;
+        view.sort_ascending = true;
+        assert_eq!(ids(&view.list_rows())[1..3], ["T-2", "T-10"]);
     }
 
     #[test]

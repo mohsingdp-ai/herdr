@@ -135,6 +135,7 @@ fn task(id: &str, title: &str, status: &str) -> TaskSummary {
         description_preview: None,
         acceptance_criteria_checked: 0,
         acceptance_criteria_total: 1,
+        created_at: Some("2026-11-04T13:25:00Z".into()),
         pane_id: None,
         fingerprint: format!("fp-{id}"),
     }
@@ -580,6 +581,12 @@ fn details_fields_tick_cycle_and_comment() {
     answer(&mut state, &sent[0], Ok(detail("TASK-2")));
 
     screen(&mut state, 150);
+    let kind = target(&state, &BoardTarget::CycleType);
+    let sent = requests(click(&mut state, kind).actions);
+    assert_eq!(update_params(&sent).task_type.as_deref(), Some("feature"));
+    answer(&mut state, &sent[0], Ok(detail("TASK-2")));
+
+    screen(&mut state, 150);
     let status = target(&state, &BoardTarget::CycleStatus);
     let sent = requests(click(&mut state, status).actions);
     assert_eq!(update_params(&sent).status.as_deref(), Some("Review"));
@@ -865,7 +872,7 @@ fn list_shows_subtasks_as_a_tree_under_their_parent_and_folds_them() {
     let mut state = rich();
     let text = screen(&mut state, 160);
     assert!(
-        text.contains("▾ PAY-101      Create Payment API (5)"),
+        text.contains("▾ PAY-101      Create Payment API 0/5"),
         "{text}"
     );
     assert!(text.contains("├─ PAY-101.1"), "{text}");
@@ -956,6 +963,10 @@ fn a_task_shows_its_agents_live_state_and_goes_to_its_pane() {
     board.tasks[0].pane_id = Some("pane_gone".into());
     answer(&mut state, list, Ok(ResponseResult::TaskList { board }));
     screen(&mut state, 150);
+    // The list has no agent column; kanban cards carry the live dot.
+    let kanban = target(&state, &BoardTarget::Mode(BoardMode::Kanban));
+    click(&mut state, kanban);
+    screen(&mut state, 150);
 
     assert!(
         !state.hits.board_view.targets.iter().any(
@@ -980,4 +991,67 @@ fn a_task_shows_its_agents_live_state_and_goes_to_its_pane() {
     );
     assert!(sent.iter().any(|request| matches!(&request.method,
         Method::PaneFocus(target) if target.pane_id == "pane_1")));
+}
+
+#[test]
+fn archive_asks_once_then_takes_the_task_off_the_board() {
+    let mut state = details_open();
+    let archive = target(&state, &BoardTarget::Archive);
+    assert!(
+        requests(click(&mut state, archive).actions).is_empty(),
+        "the first click only asks"
+    );
+    assert!(screen(&mut state, 150).contains("Archive TASK-2?"));
+
+    // Cancel takes it back.
+    let cancel = target(&state, &BoardTarget::CancelArchive);
+    click(&mut state, cancel);
+    assert!(!screen(&mut state, 150).contains("Archive TASK-2?"));
+
+    let archive = target(&state, &BoardTarget::Archive);
+    click(&mut state, archive);
+    screen(&mut state, 150);
+    let archive = target(&state, &BoardTarget::Archive);
+    let sent = requests(click(&mut state, archive).actions);
+    assert!(
+        sent.iter().any(|request| matches!(&request.method,
+            Method::TaskArchive(params) if params.id == "TASK-2")),
+        "{sent:?}"
+    );
+    let ResponseResult::TaskList { mut board } = board() else {
+        unreachable!()
+    };
+    board.tasks.retain(|task| task.id != "TASK-2");
+    let archived = sent
+        .iter()
+        .find(|request| matches!(request.method, Method::TaskArchive(_)))
+        .expect("archive request");
+    answer(&mut state, archived, Ok(ResponseResult::TaskList { board }));
+    let text = screen(&mut state, 150);
+    assert!(!text.contains("Build the login form"), "{text}");
+    assert!(
+        state
+            .board_view
+            .as_ref()
+            .is_some_and(|view| !view.details_open),
+        "the details of an archived task close"
+    );
+}
+
+#[test]
+fn a_long_list_shows_a_scrollbar_and_a_short_one_does_not() {
+    let mut short = loaded();
+    assert!(!screen(&mut short, 150).contains('▐'), "nothing to scroll");
+
+    let mut state = state();
+    let opened = open_by_tab(&mut state);
+    let ResponseResult::TaskList { mut board } = board() else {
+        unreachable!()
+    };
+    board.tasks = (1..=40)
+        .map(|n| task(&format!("TASK-{n}"), "A task", "To Do"))
+        .collect();
+    answer(&mut state, &opened[0], Ok(ResponseResult::TaskList { board }));
+    let text = screen(&mut state, 150);
+    assert!(text.contains('▐'), "{text}");
 }

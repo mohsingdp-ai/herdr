@@ -12644,6 +12644,13 @@
               },
               "type": "array"
             },
+            "created_at": {
+              "description": "When the task was created, as Backlog.md prints it (ISO 8601).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "dependencies": {
               "default": [],
               "description": "IDs of tasks this one depends on.",
@@ -12777,6 +12784,13 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "created_at": {
+              "description": "When the task was created, as Backlog.md prints it (ISO 8601).",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "dependencies": {
               "default": [],

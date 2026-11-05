@@ -209,6 +209,9 @@ pub struct TaskSummary {
     pub acceptance_criteria_checked: u32,
     #[serde(default)]
     pub acceptance_criteria_total: u32,
+    /// When the task was created, as Backlog.md prints it (ISO 8601).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
     /// The pane of the agent that last created or changed the task, as long
     /// as the server that saw it keeps running.
     #[serde(default, skip_serializing_if = "Option::is_none")]

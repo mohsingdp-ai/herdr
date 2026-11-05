@@ -813,6 +813,7 @@ struct TaskJson {
     parent_task_id: Option<String>,
     milestone: Option<String>,
     references: Vec<String>,
+    created_at: Option<String>,
     // `task view` only.
     path: Option<String>,
     description: Option<String>,
@@ -866,6 +867,7 @@ impl TaskJson {
             description_preview,
             acceptance_criteria_checked: self.acceptance_criteria_completed,
             acceptance_criteria_total: self.acceptance_criteria_count,
+            created_at: self.created_at,
             pane_id: None,
             fingerprint,
         }

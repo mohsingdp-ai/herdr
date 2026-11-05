@@ -104,6 +104,35 @@ fn list_viewport(geometry: &BoardGeometry) -> u16 {
     geometry.body.height.saturating_sub(2)
 }
 
+/// A one-column scrollbar in `track`, only when `total` items overflow the
+/// `viewport` items on screen.
+fn render_scrollbar(
+    buffer: &mut Buffer,
+    track: Rect,
+    total: usize,
+    viewport: usize,
+    scroll: usize,
+    styles: &Styles,
+) {
+    let track = track.intersection(buffer.area);
+    if total <= viewport || track.width == 0 || track.height == 0 {
+        return;
+    }
+    let max = total - viewport;
+    crate::ui::render_scrollbar_buffer(
+        buffer,
+        crate::pane::ScrollMetrics {
+            offset_from_bottom: max.saturating_sub(scroll),
+            max_offset_from_bottom: max,
+            viewport_rows: viewport,
+        },
+        Rect::new(track.x, track.y, 1, track.height),
+        styles.rule.fg.unwrap_or(Color::Reset),
+        styles.dim.fg.unwrap_or(Color::Reset),
+        "▐",
+    );
+}
+
 impl ClientBoardView {
     /// Fits scrolling to this frame's geometry, before the pure drawing pass.
     pub(super) fn prepare_frame(&mut self, area: Rect, palette: &Palette) {
@@ -275,6 +304,11 @@ impl<'a> Styles<'a> {
 
     /// A task type as a solid tag: bugs red, features blue, the rest by kind.
     fn type_tag(&self, kind: &str) -> Style {
+        self.pill(self.type_color(kind))
+    }
+
+    /// A task type's own color (the Type picker uses it as a chip).
+    fn type_color(&self, kind: &str) -> Style {
         let p = &self.palette;
         let color = match kind.to_ascii_lowercase().as_str() {
             "bug" => p.red,
@@ -285,7 +319,7 @@ impl<'a> Styles<'a> {
             "chore" | "task" => p.overlay1,
             _ => p.overlay0,
         };
-        self.pill(Style::default().fg(color))
+        Style::default().fg(color)
     }
 
     /// A filled chip in `color` on a dark version of it.
@@ -475,11 +509,11 @@ const CARD_SUBTASKS: usize = 4;
 /// Columns between kanban columns.
 const COLUMN_GAP: u16 = 2;
 
-/// `▲ High`, `◆ Medium`, `▼ Low`.
+/// `▲ High`, `■ Medium`, `▼ Low`.
 fn priority_label(priority: &str) -> String {
     let icon = match priority {
         "high" => "▲",
-        "medium" => "◆",
+        "medium" => "■",
         "low" => "▼",
         _ => "•",
     };
@@ -641,6 +675,20 @@ fn render_kanban(
                 styles.muted,
             );
         }
+        // Counted in cards, in the gap right of the column.
+        render_scrollbar(
+            buffer,
+            Rect::new(
+                rect.right(),
+                rect.y + 2,
+                1,
+                bottom.saturating_sub(rect.y + 2),
+            ),
+            tasks.len(),
+            shown,
+            scroll,
+            styles,
+        );
     }
     cursor
 }
@@ -1021,37 +1069,34 @@ fn render_toolbar(
     None
 }
 
-/// Column starts of the grouped list, and whether it has room for Deps.
-/// Where each list column starts. Type, Status and Deps drop out, in that
-/// order, when the board is narrow.
+/// Where each list column starts. Deps, Type and Created drop out, in that
+/// order, when the board is narrow. Status is left out: the group says it.
 struct ListColumns {
     id: u16,
     title: u16,
     title_width: u16,
     kind: Option<u16>,
     priority: u16,
-    status: Option<u16>,
-    agent: u16,
+    created: Option<u16>,
     deps: Option<u16>,
 }
 
 const ID_WIDTH: u16 = 16;
-const TYPE_WIDTH: u16 = 13;
-const PRIORITY_WIDTH: u16 = 12;
-const STATUS_WIDTH: u16 = 15;
-const AGENT_WIDTH: u16 = 14;
-const DEPS_WIDTH: u16 = 12;
+const TYPE_WIDTH: u16 = 16;
+const PRIORITY_WIDTH: u16 = 11;
+const CREATED_WIDTH: u16 = 10;
+const DEPS_WIDTH: u16 = 14;
 const MIN_TITLE_WIDTH: u16 = 20;
 
 impl ListColumns {
     fn new(area: Rect) -> Self {
-        let fixed = ID_WIDTH + PRIORITY_WIDTH + AGENT_WIDTH;
+        let fixed = ID_WIDTH + PRIORITY_WIDTH;
         let room = |extra: u16| area.width >= fixed + extra + MIN_TITLE_WIDTH;
-        let show_status = room(STATUS_WIDTH);
-        let show_kind = room(STATUS_WIDTH + TYPE_WIDTH);
-        let show_deps = room(STATUS_WIDTH + TYPE_WIDTH + DEPS_WIDTH);
+        let show_created = room(CREATED_WIDTH);
+        let show_kind = room(CREATED_WIDTH + TYPE_WIDTH);
+        let show_deps = room(CREATED_WIDTH + TYPE_WIDTH + DEPS_WIDTH);
         let used = fixed
-            + if show_status { STATUS_WIDTH } else { 0 }
+            + if show_created { CREATED_WIDTH } else { 0 }
             + if show_kind { TYPE_WIDTH } else { 0 }
             + if show_deps { DEPS_WIDTH } else { 0 };
         let title_width = area.width.saturating_sub(used).max(10);
@@ -1066,8 +1111,7 @@ impl ListColumns {
         };
         let kind = next(show_kind, TYPE_WIDTH);
         let priority = next(true, PRIORITY_WIDTH).unwrap_or_default();
-        let status = next(show_status, STATUS_WIDTH);
-        let agent = next(true, AGENT_WIDTH).unwrap_or_default();
+        let created = next(show_created, CREATED_WIDTH);
         let deps = next(show_deps, DEPS_WIDTH);
         Self {
             id: area.x + 2,
@@ -1075,8 +1119,7 @@ impl ListColumns {
             title_width,
             kind,
             priority,
-            status,
-            agent,
+            created,
             deps,
         }
     }
@@ -1092,13 +1135,17 @@ fn render_list(
     let area = geometry.body;
     let columns = ListColumns::new(area);
     let mut heads = vec![
-        ("ID", columns.id, Some(BoardSortKey::Id)),
+        // Past the tree marker, so it sits over the IDs.
+        ("ID", columns.id + 1, Some(BoardSortKey::Id)),
         ("Title", columns.title, Some(BoardSortKey::Title)),
     ];
     heads.extend(columns.kind.map(|x| ("Type", x, None)));
     heads.push(("Priority", columns.priority, Some(BoardSortKey::Priority)));
-    heads.extend(columns.status.map(|x| ("Status", x, None)));
-    heads.push(("Agent", columns.agent, Some(BoardSortKey::Agent)));
+    heads.extend(
+        columns
+            .created
+            .map(|x| ("Created", x, Some(BoardSortKey::Created))),
+    );
     heads.extend(columns.deps.map(|x| ("Deps", x, Some(BoardSortKey::Deps))));
     for (index, (label, x, key)) in heads.iter().enumerate() {
         let next = heads.get(index + 1).map_or(area.right(), |head| head.1);
@@ -1124,8 +1171,17 @@ fn render_list(
         hits.targets
             .push((Rect::new(*x, area.y, width, 1), BoardTarget::Sort(*key)));
     }
+    put_text(
+        buffer,
+        area.x,
+        area.y + 1,
+        area.width,
+        &"─".repeat(usize::from(area.width)),
+        styles.rule,
+    );
     let rows = view.list_rows();
     let top = area.y + 2;
+    let today = crate::platform::local_datetime().map(|now| now.date());
     let viewport = list_viewport(geometry);
     if rows
         .iter()
@@ -1180,26 +1236,32 @@ fn render_list(
                 hits.targets
                     .push((plus, BoardTarget::NewTask((*status).to_owned())));
                 let label = format!("{} {status} ", if *folded { "▸" } else { "▾" });
-                let x = put_segment(
-                    buffer,
-                    area.x,
-                    y,
-                    area.right(),
-                    &label,
-                    styles.status(status).add_modifier(Modifier::BOLD),
-                );
+                // An empty group is one quiet line.
+                let style = if *count == 0 {
+                    styles.dim
+                } else {
+                    styles.status(status).add_modifier(Modifier::BOLD)
+                };
+                let x = put_segment(buffer, area.x, y, area.right(), &label, style);
                 let end = put_segment(buffer, x, y, area.right(), &count.to_string(), styles.dim);
                 hits.targets.push((
                     Rect::new(area.x, y, end - area.x, 1),
                     BoardTarget::Group((*status).to_owned()),
                 ));
-            }
-            BoardRow::Empty => {
-                let over = group
-                    .as_deref()
-                    .is_some_and(|status| target == Some(status));
-                let text = if over { "drop here" } else { "No tasks" };
-                put_text(buffer, area.x + 2, y, area.width, text, styles.dim);
+                let over = target == Some(*status);
+                if over {
+                    put_text(buffer, end + 1, y, 10, "drop here", styles.accent);
+                } else if *count > 0 {
+                    let width = plus.x.saturating_sub(end + 2);
+                    put_text(
+                        buffer,
+                        end + 1,
+                        y,
+                        width,
+                        &"─".repeat(usize::from(width)),
+                        styles.rule,
+                    );
+                }
             }
             BoardRow::Draft => {
                 if let Some(draft) = view.draft.as_ref() {
@@ -1251,7 +1313,7 @@ fn render_list(
                     indent: 0,
                     children,
                 };
-                render_list_row(buffer, area, &columns, y, row, view, styles, hits);
+                render_list_row(buffer, area, &columns, y, row, today, view, styles);
             }
             BoardRow::Subtask { task, last } => {
                 hits.targets.push((
@@ -1264,7 +1326,7 @@ fn render_list(
                     indent: 2,
                     children: 0,
                 };
-                render_list_row(buffer, area, &columns, y, row, view, styles, hits);
+                render_list_row(buffer, area, &columns, y, row, today, view, styles);
             }
         }
     }
@@ -1282,6 +1344,15 @@ fn render_list(
         }
         hits.drop_zones.push((rect, status));
     }
+    // In the margin right of the list.
+    render_scrollbar(
+        buffer,
+        Rect::new(area.right(), top, 1, viewport),
+        rows.len(),
+        usize::from(viewport),
+        view.list_scroll,
+        styles,
+    );
     cursor
 }
 
@@ -1302,9 +1373,9 @@ fn render_list_row(
     columns: &ListColumns,
     y: u16,
     row: ListRow<'_>,
+    today: Option<time::Date>,
     view: &ClientBoardView,
     styles: &Styles,
-    hits: &mut BoardViewHits,
 ) {
     let task = row.task;
     let selected = view.selected.as_ref() == Some(&task.id) && view.details_open;
@@ -1350,19 +1421,26 @@ fn render_list_row(
         &fit(&task.id, id_width.saturating_sub(x - columns.id)),
         bg(styles.muted),
     );
-    let title = if row.children > 0 {
-        format!("{} ({})", task.title, row.children)
-    } else {
-        task.title.clone()
-    };
+    // A parent shows its subtasks' progress, `2/3`, after the title.
+    let progress = (row.children > 0).then(|| {
+        let done = view
+            .subtasks(&task.id)
+            .iter()
+            .filter(|child| is_done(&child.status))
+            .count();
+        format!(" {done}/{}", row.children)
+    });
     let title_width = columns.title_width.saturating_sub(row.indent + 1);
-    put_text(
+    let progress_width = progress
+        .as_ref()
+        .map_or(0, |text| text.chars().count() as u16);
+    let x = put_segment(
         buffer,
         columns.title + row.indent,
         y,
-        title_width,
-        &fit(&title, title_width),
-        bg(if held(view, &task.id) {
+        columns.title + row.indent + title_width.saturating_sub(progress_width),
+        &fit(&task.title, title_width.saturating_sub(progress_width)),
+        bg(if held(view, &task.id) || is_done(&task.status) {
             styles.dim
         } else if row.children > 0 {
             styles.bold
@@ -1370,89 +1448,83 @@ fn render_list_row(
             styles.base
         }),
     );
-    if let Some(x) = columns.kind {
-        match task.task_type.as_deref() {
-            Some(kind) => {
-                let label = format!(" {} ", capitalized(kind));
-                put_text(
-                    buffer,
-                    x,
-                    y,
-                    TYPE_WIDTH - 1,
-                    &fit(&label, TYPE_WIDTH - 1),
-                    styles.type_tag(kind),
-                );
-            }
-            None => put_text(buffer, x, y, 1, "—", bg(styles.dim)),
-        }
+    if let Some(progress) = progress {
+        put_text(buffer, x, y, progress_width, &progress, bg(styles.dim));
     }
-    match task.priority.as_deref() {
-        Some(priority) => {
-            let label = priority_label(priority);
-            put_text(
-                buffer,
-                columns.priority,
-                y,
-                PRIORITY_WIDTH - 1,
-                &fit(&label, PRIORITY_WIDTH - 1),
-                styles.pill(styles.priority(Some(priority))),
-            );
-        }
-        None => put_text(buffer, columns.priority, y, 1, "—", bg(styles.dim)),
-    }
-    if let Some(x) = columns.status {
-        let label = format!(" {} ", task.status);
+    if let (Some(x), Some(kind)) = (columns.kind, task.task_type.as_deref()) {
+        let color = styles.type_tag(kind).bg.unwrap_or(styles.palette.overlay1);
+        let label = format!("◆ {}", capitalized(kind));
         put_text(
             buffer,
             x,
             y,
-            STATUS_WIDTH - 1,
-            &fit(&label, STATUS_WIDTH - 1),
-            styles.status_pill(&task.status),
+            TYPE_WIDTH - 1,
+            &fit(&label, TYPE_WIDTH - 1),
+            bg(Style::default().fg(color)),
         );
     }
-    let live = styles.task_agent(task);
-    match task
-        .assignees
-        .first()
-        .map(String::as_str)
-        .or(live.map(|(_, name, _)| name))
-    {
-        Some(agent) => {
-            let text = format!("● {}", agent_name(agent));
-            put_text(
-                buffer,
-                columns.agent,
-                y,
-                AGENT_WIDTH - 1,
-                &fit(&text, AGENT_WIDTH - 1),
-                bg(styles.agent(agent)),
-            );
-            if let Some((pane_id, _, color)) = live {
-                put_text(
-                    buffer,
-                    columns.agent,
-                    y,
-                    1,
-                    "●",
-                    bg(Style::default().fg(color)),
-                );
-                hits.targets.push((
-                    Rect::new(columns.agent, y, AGENT_WIDTH - 1, 1),
-                    BoardTarget::FocusPane(pane_id.to_owned()),
-                ));
-            }
-        }
-        None => put_text(buffer, columns.agent, y, 1, "—", bg(styles.dim)),
+    if let Some(priority) = task.priority.as_deref() {
+        let label = priority_label(priority);
+        put_text(
+            buffer,
+            columns.priority,
+            y,
+            PRIORITY_WIDTH - 1,
+            &fit(label.trim(), PRIORITY_WIDTH - 1),
+            bg(styles.priority(Some(priority))),
+        );
+    }
+    if let (Some(x), Some(date)) = (columns.created, task.created_at.as_deref()) {
+        put_text(
+            buffer,
+            x,
+            y,
+            CREATED_WIDTH - 1,
+            &created_label(date, today),
+            bg(styles.muted),
+        );
     }
     if let Some(deps) = columns.deps {
-        let width = area.right().saturating_sub(deps);
-        let text = if task.dependencies.is_empty() {
-            "—".to_owned()
-        } else {
-            task.dependencies.join(", ")
-        };
-        put_text(buffer, deps, y, width, &fit(&text, width), bg(styles.dim));
+        // `← TASK-4`, red while that task is not done.
+        let mut x = deps;
+        for id in &task.dependencies {
+            let open = view
+                .board
+                .as_ref()
+                .and_then(|board| board.tasks.iter().find(|other| other.id == *id))
+                .is_some_and(|other| !is_done(&other.status));
+            let style = if open { styles.red } else { styles.dim };
+            x = put_segment(buffer, x, y, area.right(), &format!("← {id} "), bg(style));
+        }
+    }
+}
+
+fn is_done(status: &str) -> bool {
+    status.eq_ignore_ascii_case("done")
+}
+
+/// "today" for today, "Nov 4" this year, else "Nov 2025", from the date at
+/// the start of Backlog.md's `createdAt`.
+fn created_label(created: &str, today: Option<time::Date>) -> String {
+    let mut parts = created.get(..10).unwrap_or_default().split('-');
+    let mut next = || parts.next().and_then(|part| part.parse::<i32>().ok());
+    let (Some(year), Some(month), Some(day)) = (next(), next(), next()) else {
+        return String::new();
+    };
+    let Some(date) = u8::try_from(month)
+        .ok()
+        .and_then(|month| time::Month::try_from(month).ok())
+        .and_then(|month| {
+            time::Date::from_calendar_date(year, month, u8::try_from(day).ok()?).ok()
+        })
+    else {
+        return String::new();
+    };
+    let month = &date.month().to_string()[..3];
+    match today {
+        Some(today) if today == date => "today".to_owned(),
+        Some(today) if today.year() == date.year() => format!("{month} {}", date.day()),
+        _ => format!("{month} {}", date.year()),
     }
 }
 
@@ -1753,16 +1825,35 @@ fn detail_lines(view: &ClientBoardView, width: u16, styles: &Styles) -> Vec<Deta
         styles.priority(task.priority.as_deref()),
         BoardTarget::CyclePriority,
     ));
-    lines.push(if editing == Some(BoardField::Type) {
-        DetailLine::input(vec![label("Type"), (" ".to_owned(), styles.base)])
+    lines.push(field(
+        "Type",
+        task.task_type.clone().unwrap_or_else(|| "none".into()),
+        task.task_type
+            .as_deref()
+            .map_or(styles.muted, |kind| styles.type_color(kind)),
+        BoardTarget::CycleType,
+    ));
+    lines.push(DetailLine::blank());
+    // Archive asks once before it takes the task off the board.
+    if view.archive_armed.as_ref() == Some(&task.id) {
+        lines.push(DetailLine::text(
+            format!("Archive {}? It can be restored.", task.id),
+            styles.base,
+        ));
+        lines.push(
+            DetailLine::new(vec![(" Yes, archive ".to_owned(), styles.pill(styles.red))])
+                .on_click(BoardTarget::Archive),
+        );
+        lines.push(
+            DetailLine::new(vec![(" Cancel ".to_owned(), styles.button)])
+                .on_click(BoardTarget::CancelArchive),
+        );
     } else {
-        field(
-            "Type",
-            task.task_type.clone().unwrap_or_else(|| "none".into()),
-            styles.muted,
-            BoardTarget::Field(BoardField::Type),
-        )
-    });
+        lines.push(
+            DetailLine::new(vec![(" ⌫ Archive task ".to_owned(), styles.button)])
+                .on_click(BoardTarget::Archive),
+        );
+    }
     lines.push(DetailLine::blank());
     lines.push(DetailLine::text(
         "─".repeat(usize::from(width)),
@@ -2035,15 +2126,14 @@ fn render_details(
         );
         hits.targets.push((close, BoardTarget::CloseDetails));
     }
-    if lines.len() > view.details_scroll + usize::from(text.height) {
-        put_text(
-            buffer,
-            text.right().saturating_sub(1),
-            text.bottom() - 1,
-            1,
-            "↓",
-            styles.dim,
-        );
-    }
+    // Below the × so the two never share a cell.
+    render_scrollbar(
+        buffer,
+        Rect::new(text.right(), text.y + 1, 1, text.height.saturating_sub(1)),
+        lines.len(),
+        usize::from(text.height),
+        view.details_scroll,
+        styles,
+    );
     cursor
 }
