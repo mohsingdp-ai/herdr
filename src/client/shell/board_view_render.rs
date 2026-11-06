@@ -1181,7 +1181,7 @@ fn render_list(
     );
     let rows = view.list_rows();
     let top = area.y + 2;
-    let today = crate::platform::local_datetime().map(|now| now.date());
+    let clock = local_clock();
     let viewport = list_viewport(geometry);
     if rows
         .iter()
@@ -1313,7 +1313,7 @@ fn render_list(
                     indent: 0,
                     children,
                 };
-                render_list_row(buffer, area, &columns, y, row, today, view, styles);
+                render_list_row(buffer, area, &columns, y, row, clock, view, styles);
             }
             BoardRow::Subtask { task, last } => {
                 hits.targets.push((
@@ -1326,7 +1326,7 @@ fn render_list(
                     indent: 2,
                     children: 0,
                 };
-                render_list_row(buffer, area, &columns, y, row, today, view, styles);
+                render_list_row(buffer, area, &columns, y, row, clock, view, styles);
             }
         }
     }
@@ -1373,7 +1373,7 @@ fn render_list_row(
     columns: &ListColumns,
     y: u16,
     row: ListRow<'_>,
-    today: Option<time::Date>,
+    clock: Option<LocalClock>,
     view: &ClientBoardView,
     styles: &Styles,
 ) {
@@ -1480,7 +1480,7 @@ fn render_list_row(
             x,
             y,
             CREATED_WIDTH - 1,
-            &created_label(date, today),
+            &created_label(date, clock),
             bg(styles.muted),
         );
     }
@@ -1503,25 +1503,51 @@ fn is_done(status: &str) -> bool {
     status.eq_ignore_ascii_case("done")
 }
 
-/// "today" for today, "Nov 4" this year, else "Nov 2025", from the date at
-/// the start of Backlog.md's `createdAt`.
-fn created_label(created: &str, today: Option<time::Date>) -> String {
-    let mut parts = created.get(..10).unwrap_or_default().split('-');
-    let mut next = || parts.next().and_then(|part| part.parse::<i32>().ok());
-    let (Some(year), Some(month), Some(day)) = (next(), next(), next()) else {
-        return String::new();
-    };
-    let Some(date) = u8::try_from(month)
-        .ok()
-        .and_then(|month| time::Month::try_from(month).ok())
-        .and_then(|month| {
-            time::Date::from_calendar_date(year, month, u8::try_from(day).ok()?).ok()
-        })
+/// Today's local date and the local clock's offset from UTC.
+#[derive(Debug, Clone, Copy)]
+struct LocalClock {
+    today: time::Date,
+    offset: time::Duration,
+}
+
+/// Read once per frame.
+fn local_clock() -> Option<LocalClock> {
+    let local = crate::platform::local_datetime()?;
+    let utc = time::OffsetDateTime::now_utc();
+    let utc = time::PrimitiveDateTime::new(utc.date(), utc.time());
+    // Whole minutes: the two clocks are read a moment apart.
+    let minutes = ((local - utc).whole_seconds() + 30).div_euclid(60);
+    Some(LocalClock {
+        today: local.date(),
+        offset: time::Duration::minutes(minutes),
+    })
+}
+
+/// "today" for today, "Nov 4" this year, else "Nov 2025". Backlog.md's
+/// `createdAt` is UTC (`2026-11-05T09:04:00Z`), so it moves to the local
+/// day first: 21:30 UTC is the next day east of it.
+fn created_label(created: &str, clock: Option<LocalClock>) -> String {
+    let number = |range: std::ops::Range<usize>| created.get(range)?.parse::<u8>().ok();
+    let Some(date) = created
+        .get(..4)
+        .and_then(|year| year.parse::<i32>().ok())
+        .zip(number(5..7).and_then(|month| time::Month::try_from(month).ok()))
+        .zip(number(8..10))
+        .and_then(|((year, month), day)| time::Date::from_calendar_date(year, month, day).ok())
     else {
         return String::new();
     };
+    let clock_time = number(11..13)
+        .zip(number(14..16))
+        .and_then(|(hour, minute)| time::Time::from_hms(hour, minute, 0).ok());
+    let date = match (clock_time, clock) {
+        (Some(at), Some(clock)) => time::PrimitiveDateTime::new(date, at)
+            .checked_add(clock.offset)
+            .map_or(date, |local| local.date()),
+        _ => date,
+    };
     let month = &date.month().to_string()[..3];
-    match today {
+    match clock.map(|clock| clock.today) {
         Some(today) if today == date => "today".to_owned(),
         Some(today) if today.year() == date.year() => format!("{month} {}", date.day()),
         _ => format!("{month} {}", date.year()),
@@ -2136,4 +2162,33 @@ fn render_details(
         styles,
     );
     cursor
+}
+
+#[cfg(test)]
+mod created_label_tests {
+    use super::*;
+
+    fn clock(day: u8, hours: i64) -> Option<LocalClock> {
+        Some(LocalClock {
+            today: time::Date::from_calendar_date(2026, time::Month::November, day).ok()?,
+            offset: time::Duration::hours(hours),
+        })
+    }
+
+    #[test]
+    fn created_dates_use_the_local_day() {
+        // 21:30 UTC on Nov 4 is 02:30 on Nov 5 at UTC+5.
+        assert_eq!(created_label("2026-11-04T21:30:00Z", clock(5, 5)), "today");
+        assert_eq!(created_label("2026-11-04T21:30:00Z", clock(6, 5)), "Nov 5");
+        // West of UTC the day can move back.
+        assert_eq!(created_label("2026-11-05T02:00:00Z", clock(5, -5)), "Nov 4");
+        // Across a year, and without a clock the UTC date stands.
+        assert_eq!(created_label("2025-12-31T22:00:00Z", clock(5, 5)), "Jan 1");
+        assert_eq!(
+            created_label("2025-12-31T22:00:00Z", clock(5, 0)),
+            "Dec 2025"
+        );
+        assert_eq!(created_label("2026-11-04T21:30:00Z", None), "Nov 2026");
+        assert_eq!(created_label("not a date", clock(5, 5)), "");
+    }
 }

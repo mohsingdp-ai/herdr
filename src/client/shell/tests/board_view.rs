@@ -1051,7 +1051,11 @@ fn a_long_list_shows_a_scrollbar_and_a_short_one_does_not() {
     board.tasks = (1..=40)
         .map(|n| task(&format!("TASK-{n}"), "A task", "To Do"))
         .collect();
-    answer(&mut state, &opened[0], Ok(ResponseResult::TaskList { board }));
+    answer(
+        &mut state,
+        &opened[0],
+        Ok(ResponseResult::TaskList { board }),
+    );
     let text = screen(&mut state, 150);
     assert!(text.contains('▐'), "{text}");
 }

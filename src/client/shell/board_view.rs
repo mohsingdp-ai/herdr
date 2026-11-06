@@ -12,7 +12,12 @@ use super::*;
 use crate::api::schema::{Method, ResponseResult, TaskBoardInfo, TaskDetail, TaskSummary};
 
 /// While a Board is on screen, it asks this often whether its tasks changed.
-const STAMP_INTERVAL: Duration = Duration::from_secs(2);
+/// The check is a directory listing on the server, so a quick beat costs
+/// little and shows any move (Board, `herdr task`, raw `backlog`, a file
+/// edit) within a fraction of a second.
+/// ponytail: polling; a pushed `tasks.changed` to the TUI would need a new
+/// client endpoint capability and still miss raw `backlog` edits.
+const STAMP_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Priority filter choices after "all".
 pub(super) const PRIORITIES: [&str; 3] = ["high", "medium", "low"];
