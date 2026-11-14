@@ -228,24 +228,45 @@ impl App {
     /// Each agent pane's own folder: an agent can work in a worktree or repo
     /// other than its space's. Panes in one repository share one job.
     fn agent_pane_git_refresh_items(&self) -> Vec<WorkspaceGitRefreshItem> {
-        let snapshot = self.session_metadata_snapshot();
-        snapshot
-            .agents
-            .iter()
-            .filter_map(|agent| {
-                let pane = snapshot
-                    .panes
-                    .iter()
-                    .find(|pane| pane.pane_id == agent.pane_id)?;
-                let folder = pane.foreground_cwd.as_ref().or(pane.cwd.as_ref())?;
-                Some(WorkspaceGitRefreshItem {
-                    workspace_id: agent.workspace_id.clone(),
-                    resolved_identity_cwd: PathBuf::from(folder),
-                    cache_key_hint: None,
-                    pane_id: Some(agent.pane_id.clone()),
-                })
-            })
-            .collect()
+        // Runs on the event loop each refresh tick: look up agent panes'
+        // folders only, never a whole session snapshot (process reads per pane).
+        let mut items = Vec::new();
+        for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
+            for tab in &ws.tabs {
+                for (&pane_id, pane) in &tab.panes {
+                    let is_agent = self
+                        .state
+                        .terminals
+                        .get(&pane.attached_terminal_id)
+                        .is_some_and(|terminal| terminal.is_agent_terminal());
+                    if !is_agent {
+                        continue;
+                    }
+                    let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+                        continue;
+                    };
+                    let Some(folder) = tab
+                        .foreground_cwd_for_pane(pane_id, &self.terminal_runtimes)
+                        .or_else(|| {
+                            tab.cwd_for_pane(
+                                pane_id,
+                                &self.state.terminals,
+                                &self.terminal_runtimes,
+                            )
+                        })
+                    else {
+                        continue;
+                    };
+                    items.push(WorkspaceGitRefreshItem {
+                        workspace_id: self.public_workspace_id(ws_idx),
+                        resolved_identity_cwd: folder,
+                        cache_key_hint: None,
+                        pane_id: Some(public_pane_id),
+                    });
+                }
+            }
+        }
+        items
     }
 }
 
@@ -396,6 +417,35 @@ mod tests {
         // The agent in the space's repo shares its job: two folders, two reads.
         assert_eq!(output.cache_updates.len(), 2);
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn agent_pane_git_refresh_items_list_only_agent_panes() {
+        let mut app = test_app(&crate::config::Config::default());
+        let mut workspace = Workspace::test_new("agents");
+        let agent_pane = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.test_split(ratatui::layout::Direction::Vertical);
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        let tab = &app.state.workspaces[0].tabs[0];
+        assert_eq!(tab.panes.len(), 3);
+        let agent_terminal = tab.panes[&agent_pane].attached_terminal_id.clone();
+        let agent_cwd = std::env::temp_dir().join("herdr-agent-folder");
+        let terminal = app.state.terminals.get_mut(&agent_terminal).unwrap();
+        terminal.agent_name = Some("claude".into());
+        terminal.cwd = agent_cwd.clone();
+
+        let items = app.agent_pane_git_refresh_items();
+
+        assert_eq!(
+            items,
+            vec![WorkspaceGitRefreshItem {
+                workspace_id: app.public_workspace_id(0),
+                resolved_identity_cwd: agent_cwd,
+                cache_key_hint: None,
+                pane_id: app.public_pane_id(0, agent_pane),
+            }]
+        );
     }
 
     #[test]
